@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LM Routing - Last Mile Shipment Router</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f0f2f5; }
+        .header { background: #1a73e8; color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 20px; font-weight: 500; }
+        .header .hub-info { font-size: 13px; opacity: 0.9; }
+        .container { display: flex; height: calc(100vh - 52px); }
+        .sidebar { width: 380px; background: white; overflow-y: auto; border-right: 1px solid #ddd; }
+        .map-area { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        .panel { padding: 16px; border-bottom: 1px solid #eee; }
+        .panel h3 { font-size: 14px; color: #333; margin-bottom: 10px; }
+        .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
+        .form-row label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+        .form-row input, .form-row select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .btn-primary { background: #1a73e8; color: white; }
+        .btn-primary:hover { background: #1557b0; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+
+        .summary-card { background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
+        .summary-card .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+        .summary-card .stat .label { color: #666; }
+        .summary-card .stat .value { font-weight: 600; color: #333; }
+
+        .sr-list { list-style: none; }
+        .sr-item { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.15s; }
+        .sr-item:hover { background: #e8f0fe; }
+        .sr-item.active { background: #d2e3fc; border-left: 3px solid #1a73e8; }
+        .sr-item .sr-name { font-size: 13px; font-weight: 500; }
+        .sr-item .sr-count { font-size: 12px; color: #666; background: #eee; padding: 2px 8px; border-radius: 10px; }
+
+        .stop-list { list-style: none; max-height: 300px; overflow-y: auto; }
+        .stop-item { padding: 8px 12px; border-bottom: 1px solid #f5f5f5; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+        .stop-num { background: #1a73e8; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; flex-shrink: 0; }
+        .stop-details { flex: 1; }
+        .stop-details .pincode { font-weight: 500; }
+        .stop-details .meta { color: #888; font-size: 11px; }
+
+        .route-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .route-stat { background: #e8f0fe; padding: 8px; border-radius: 6px; text-align: center; }
+        .route-stat .num { font-size: 18px; font-weight: 600; color: #1a73e8; }
+        .route-stat .lbl { font-size: 11px; color: #666; }
+
+        .loading { text-align: center; padding: 20px; color: #888; }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .legend { position: absolute; bottom: 20px; left: 20px; background: white; padding: 10px 14px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; z-index: 10; }
+        .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🚚 Last Mile Routing</h1>
+        </div>
+        <div class="hub-info">
+            Hub: <strong th:text="${hubName}">PNQ HDP</strong> |
+            <span th:text="${hubLat}">18.46</span>, <span th:text="${hubLng}">73.89</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <!-- Controls -->
+            <div class="panel">
+                <h3>⚙️ Route Configuration</h3>
+                <div class="form-row">
+                    <div style="flex:1">
+                        <label>Allocation Date</label>
+                        <select id="dateSelect">
+                            <option value="24-Mar-26">24-Mar-26</option>
+                        </select>
+                    </div>
+                    <div style="flex:1">
+                        <label>Number of SRs</label>
+                        <input type="number" id="srCount" value="10" min="1" max="100">
+                    </div>
+                </div>
+                <button class="btn btn-primary" id="runBtn" onclick="runRouting()" style="width:100%">
+                    🔄 Generate Routes
+                </button>
+            </div>
+
+            <!-- Summary -->
+            <div class="panel" id="summaryPanel" style="display:none">
+                <h3>📊 Routing Summary</h3>
+                <div class="summary-card" id="summaryCard"></div>
+            </div>
+
+            <!-- SR List -->
+            <div class="panel" id="srPanel" style="display:none">
+                <h3>👷 Service Representatives</h3>
+                <ul class="sr-list" id="srList"></ul>
+            </div>
+
+            <!-- Route Details -->
+            <div class="panel" id="routePanel" style="display:none">
+                <h3 id="routeTitle">📍 Route Details</h3>
+                <div class="route-stats" id="routeStats"></div>
+                <ul class="stop-list" id="stopList"></ul>
+            </div>
+        </div>
+
+        <div class="map-area">
+            <div id="map"></div>
+            <div class="legend" id="legend" style="display:none">
+                <strong>Legend</strong>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:#e53935"></div> Hub
+                </div>
+                <div id="legendItems"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const HUB_LAT = [[${hubLat}]];
+        const HUB_LNG = [[${hubLng}]];
+        const API_KEY = '[[${apiKey}]]';
+
+        let map, hubMarker;
+        let srMarkers = {};
+        let srPolylines = {};
+        let currentSR = null;
+
+        const SR_COLORS = [
+            '#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa',
+            '#00acc1', '#f4511e', '#3949ab', '#7cb342', '#c0ca33',
+            '#6d4c41', '#546e7a', '#d81b60', '#039be5', '#00897b',
+            '#ffb300', '#5e35b1', '#1565c0', '#2e7d32', '#ef6c00'
+        ];
+
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: HUB_LAT, lng: HUB_LNG },
+                zoom: 13,
+                styles: [
+                    { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+                    { featureType: 'transit', stylers: [{ visibility: 'off' }] }
+                ]
+            });
+
+            hubMarker = new google.maps.Marker({
+                position: { lat: HUB_LAT, lng: HUB_LNG },
+                map: map,
+                title: 'Hub: PNQ HDP',
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 12,
+                    fillColor: '#e53935',
+                    fillOpacity: 1,
+                    strokeColor: '#fff',
+                    strokeWeight: 3
+                },
+                zIndex: 1000
+            });
+
+            // Load dates
+            fetch('/api/dates').then(r => r.json()).then(dates => {
+                if (dates.length > 0) {
+                    const sel = document.getElementById('dateSelect');
+                    sel.innerHTML = '';
+                    dates.forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d; opt.textContent = d;
+                        sel.appendChild(opt);
+                    });
+                }
+            });
+        }
+
+        async function runRouting() {
+            const date = document.getElementById('dateSelect').value;
+            const srCount = document.getElementById('srCount').value;
+            const btn = document.getElementById('runBtn');
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Generating...';
+            clearMap();
+
+            try {
+                const resp = await fetch(`/api/route?date=${encodeURIComponent(date)}&srCount=${srCount}`, {
+                    method: 'POST'
+                });
+                const summary = await resp.json();
+                showSummary(summary);
+                showSRList(summary.srSummaries);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Generate Routes';
+            }
+        }
+
+        function showSummary(summary) {
+            document.getElementById('summaryPanel').style.display = 'block';
+            document.getElementById('summaryCard').innerHTML = `
+                <div class="stat"><span class="label">Total Shipments</span><span class="value">${summary.totalShipments}</span></div>
+                <div class="stat"><span class="label">Total SRs</span><span class="value">${summary.totalSRs}</span></div>
+                <div class="stat"><span class="label">Avg per SR</span><span class="value">${Math.round(summary.totalShipments / summary.totalSRs)}</span></div>
+                <div class="stat"><span class="label">Pincodes</span><span class="value">${summary.pincodes.join(', ')}</span></div>
+            `;
+        }
+
+        function showSRList(srSummaries) {
+            document.getElementById('srPanel').style.display = 'block';
+            const list = document.getElementById('srList');
+            list.innerHTML = '';
+
+            srSummaries.forEach((sr, i) => {
+                const li = document.createElement('li');
+                li.className = 'sr-item';
+                li.innerHTML = `
+                    <div>
+                        <div class="sr-name" style="color:${SR_COLORS[i % SR_COLORS.length]}">● ${sr.srName}</div>
+                        <div style="font-size:11px;color:#888;margin-top:2px">${sr.pincodesCovered.join(', ')}</div>
+                    </div>
+                    <span class="sr-count">${sr.shipmentCount}</span>
+                `;
+                li.onclick = () => loadSRRoute(sr.srName, i);
+                list.appendChild(li);
+            });
+
+            // Show all SR markers on map
+            showAllSRsOnMap(srSummaries);
+        }
+
+        async function showAllSRsOnMap(srSummaries) {
+            document.getElementById('legend').style.display = 'block';
+            const legendItems = document.getElementById('legendItems');
+            legendItems.innerHTML = '';
+
+            for (let i = 0; i < srSummaries.length; i++) {
+                const sr = srSummaries[i];
+                const color = SR_COLORS[i % SR_COLORS.length];
+
+                legendItems.innerHTML += `
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background:${color}"></div>
+                        ${sr.srName} (${sr.shipmentCount})
+                    </div>
+                `;
+
+                // Load route for each SR
+                try {
+                    const resp = await fetch(`/api/route/${encodeURIComponent(sr.srName)}`);
+                    const route = await resp.json();
+                    addSRToMap(sr.srName, route, color, i);
+                } catch (e) {
+                    console.error('Error loading route for', sr.srName, e);
+                }
+            }
+        }
+
+        function addSRToMap(srName, route, color, index) {
+            if (!route.stops || route.stops.length === 0) return;
+
+            srMarkers[srName] = [];
+
+            // Add markers for each stop
+            route.stops.forEach((stop, i) => {
+                const marker = new google.maps.Marker({
+                    position: { lat: stop.latitude, lng: stop.longitude },
+                    map: map,
+                    title: `${srName} - Stop ${stop.sequence}: ${stop.dropPincode}`,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 6,
+                        fillColor: color,
+                        fillOpacity: 0.8,
+                        strokeColor: '#fff',
+                        strokeWeight: 1.5
+                    },
+                    zIndex: 100 + index
+                });
+
+                const infoWindow = new google.maps.InfoWindow({
+                    content: `<div style="font-size:12px">
+                        <strong>${srName} - Stop #${stop.sequence}</strong><br>
+                        Pincode: ${stop.dropPincode}<br>
+                        ID: ${stop.shippingId}<br>
+                        Type: ${stop.orderType} | ${stop.weight}kg
+                    </div>`
+                });
+                marker.addListener('click', () => infoWindow.open(map, marker));
+                srMarkers[srName].push(marker);
+            });
+
+            // Draw polyline
+            if (route.polylinePoints && route.polylinePoints.length > 0) {
+                const path = route.polylinePoints.map(p => ({ lat: p.lat, lng: p.lng }));
+                const polyline = new google.maps.Polyline({
+                    path: path,
+                    geodesic: true,
+                    strokeColor: color,
+                    strokeOpacity: 0.7,
+                    strokeWeight: 3,
+                    map: map
+                });
+                srPolylines[srName] = polyline;
+            }
+        }
+
+        async function loadSRRoute(srName, index) {
+            // Highlight active SR
+            document.querySelectorAll('.sr-item').forEach((el, i) => {
+                el.classList.toggle('active', i === index);
+            });
+
+            currentSR = srName;
+            document.getElementById('routePanel').style.display = 'block';
+            document.getElementById('routeTitle').textContent = `📍 Route: ${srName}`;
+            document.getElementById('routeStats').innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+            document.getElementById('stopList').innerHTML = '';
+
+            try {
+                const resp = await fetch(`/api/route/${encodeURIComponent(srName)}`);
+                const route = await resp.json();
+                showRouteDetails(route, index);
+            } catch (e) {
+                document.getElementById('routeStats').innerHTML = '<div class="loading">Error loading route</div>';
+            }
+        }
+
+        function showRouteDetails(route, index) {
+            const color = SR_COLORS[index % SR_COLORS.length];
+
+            document.getElementById('routeStats').innerHTML = `
+                <div class="route-stat"><div class="num">${route.totalShipments}</div><div class="lbl">Stops</div></div>
+                <div class="route-stat"><div class="num">${route.totalDistanceKm}</div><div class="lbl">km Distance</div></div>
+                <div class="route-stat"><div class="num">${route.totalDurationMinutes}</div><div class="lbl">min Duration</div></div>
+                <div class="route-stat"><div class="num">${route.stops.length > 0 ? route.stops.map(s => s.dropPincode).filter((v,i,a) => a.indexOf(v) === i).length : 0}</div><div class="lbl">Pincodes</div></div>
+            `;
+
+            const list = document.getElementById('stopList');
+            list.innerHTML = '';
+            route.stops.forEach(stop => {
+                const li = document.createElement('li');
+                li.className = 'stop-item';
+                li.innerHTML = `
+                    <div class="stop-num" style="background:${color}">${stop.sequence}</div>
+                    <div class="stop-details">
+                        <div class="pincode">${stop.dropPincode}</div>
+                        <div class="meta">${stop.shippingId} | ${stop.orderType} | ${stop.weight}kg</div>
+                    </div>
+                `;
+                li.onclick = () => {
+                    map.panTo({ lat: stop.latitude, lng: stop.longitude });
+                    map.setZoom(16);
+                };
+                list.appendChild(li);
+            });
+
+            // Zoom to this SR's route
+            if (route.stops.length > 0) {
+                const bounds = new google.maps.LatLngBounds();
+                bounds.extend({ lat: HUB_LAT, lng: HUB_LNG });
+                route.stops.forEach(s => bounds.extend({ lat: s.latitude, lng: s.longitude }));
+                map.fitBounds(bounds, 50);
+            }
+        }
+
+        function clearMap() {
+            Object.values(srMarkers).flat().forEach(m => m.setMap(null));
+            Object.values(srPolylines).forEach(p => p.setMap(null));
+            srMarkers = {};
+            srPolylines = {};
+            document.getElementById('summaryPanel').style.display = 'none';
+            document.getElementById('srPanel').style.display = 'none';
+            document.getElementById('routePanel').style.display = 'none';
+            document.getElementById('legend').style.display = 'none';
+        }
+    </script>
+
+    <script th:if="${apiKey != null and apiKey != '' and apiKey != 'YOUR_GOOGLE_MAPS_API_KEY'}"
+            th:src="'https://maps.googleapis.com/maps/api/js?key=' + ${apiKey} + '&callback=initMap'" async defer></script>
+
+    <!-- Fallback: use Leaflet if no Google Maps API key -->
+    <script th:if="${apiKey == null or apiKey == '' or apiKey == 'YOUR_GOOGLE_MAPS_API_KEY'}">
+        // Load Leaflet as fallback
+        document.head.innerHTML += '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>';
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        s.onload = initLeafletMap;
+        document.body.appendChild(s);
+
+        function initLeafletMap() {
+            // Override Google Maps API with Leaflet equivalents
+            window.google = { maps: createLeafletShim() };
+            initMap();
+        }
+
+        function createLeafletShim() {
+            let leafletMap;
+            const markers = [];
+            const polylines = [];
+
+            return {
+                SymbolPath: { CIRCLE: 'circle' },
+                Map: function(el, opts) {
+                    leafletMap = L.map(el).setView([opts.center.lat, opts.center.lng], opts.zoom);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '© OpenStreetMap contributors'
+                    }).addTo(leafletMap);
+                    this.panTo = (pos) => leafletMap.panTo([pos.lat, pos.lng]);
+                    this.setZoom = (z) => leafletMap.setZoom(z);
+                    this.fitBounds = (bounds, pad) => {
+                        if (bounds._points && bounds._points.length > 0) {
+                            leafletMap.fitBounds(bounds._points.map(p => [p.lat, p.lng]), { padding: [pad || 50, pad || 50] });
+                        }
+                    };
+                    return this;
+                },
+                Marker: function(opts) {
+                    const color = opts.icon ? opts.icon.fillColor : '#e53935';
+                    const size = opts.icon ? opts.icon.scale * 2 : 16;
+                    const icon = L.divIcon({
+                        className: '',
+                        html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`,
+                        iconSize: [size, size],
+                        iconAnchor: [size/2, size/2]
+                    });
+                    const marker = L.marker([opts.position.lat, opts.position.lng], { icon, title: opts.title });
+                    if (opts.map) marker.addTo(leafletMap);
+                    this.setMap = (m) => { if (m) marker.addTo(leafletMap); else leafletMap.removeLayer(marker); };
+                    this.addListener = (evt, fn) => {
+                        if (evt === 'click') marker.on('click', fn);
+                    };
+                    this._marker = marker;
+                    return this;
+                },
+                InfoWindow: function(opts) {
+                    this.open = (m, marker) => { if (marker._marker) marker._marker.bindPopup(opts.content).openPopup(); };
+                    return this;
+                },
+                Polyline: function(opts) {
+                    const line = L.polyline(opts.path.map(p => [p.lat, p.lng]), {
+                        color: opts.strokeColor, opacity: opts.strokeOpacity, weight: opts.strokeWeight
+                    });
+                    if (opts.map) line.addTo(leafletMap);
+                    this.setMap = (m) => { if (m) line.addTo(leafletMap); else leafletMap.removeLayer(line); };
+                    return this;
+                },
+                LatLngBounds: function() {
+                    this._points = [];
+                    this.extend = (p) => { this._points.push(p); };
+                    return this;
+                }
+            };
+        }
+    </script>
+</body>
+</html>
