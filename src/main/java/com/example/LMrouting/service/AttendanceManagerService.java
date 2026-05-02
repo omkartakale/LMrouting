@@ -74,4 +74,14 @@ public class AttendanceManagerService {
         ensureSrRegistrySeeded();
         return store.getSrNames();
     }
+
+    public void addSr(String srName) {
+        ensureSrRegistrySeeded();
+        List<String> current = store.getSrNames();
+        if (!current.contains(srName)) {
+            current.add(srName);
+            store.setSrNames(current);
+            log.info("AttendanceManagerService: added new SR '{}'", srName);
+        }
+    }
 }

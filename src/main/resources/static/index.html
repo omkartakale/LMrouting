@@ -180,6 +180,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         SR Attendance
         <span class="badge" id="present-count-badge">0 present</span>
       </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <button class="btn btn-secondary" id="mark-all-btn" style="flex:1;font-size:.78rem" onclick="markAllPresent()">All Present</button>
+        <button class="btn btn-secondary" id="mark-none-btn" style="flex:1;font-size:.78rem" onclick="markNonePresent()">All Absent</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input type="text" id="new-sr-input" placeholder="New SR name (e.g. SR-011)" style="flex:1;padding:6px 8px;border:1px solid #ced4da;border-radius:6px;font-size:.82rem"/>
+        <button class="btn btn-primary" style="font-size:.78rem;white-space:nowrap" onclick="addNewSr()">+ Add SR</button>
+      </div>
       <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
     </div>
 
@@ -571,6 +579,55 @@ function toggleAttendance(checkbox) {
       document.getElementById('present-count-badge').textContent = checked + ' / ' + total + ' present';
     })
     .catch(function(e) { showAllocError('Attendance update failed: ' + e.message); });
+}
+
+function markAllPresent() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Please select a date first.'); return; }
+  var checkboxes = document.querySelectorAll('#attendance-list input[type="checkbox"]');
+  var promises = [];
+  checkboxes.forEach(function(cb) {
+    if (!cb.checked) {
+      cb.checked = true;
+      var srName = cb.getAttribute('data-sr');
+      promises.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=true', { method: 'PUT' }));
+    }
+  });
+  Promise.all(promises).then(function() {
+    loadAttendance(date);
+  });
+}
+
+function markNonePresent() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Please select a date first.'); return; }
+  var checkboxes = document.querySelectorAll('#attendance-list input[type="checkbox"]');
+  var promises = [];
+  checkboxes.forEach(function(cb) {
+    if (cb.checked) {
+      cb.checked = false;
+      var srName = cb.getAttribute('data-sr');
+      promises.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=false', { method: 'PUT' }));
+    }
+  });
+  Promise.all(promises).then(function() {
+    loadAttendance(date);
+  });
+}
+
+function addNewSr() {
+  var input = document.getElementById('new-sr-input');
+  var name = input.value.trim();
+  if (!name) { showAllocError('Please enter an SR name.'); return; }
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Please select a date first.'); return; }
+  fetch('/api/attendance/sr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ srName: name }) })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
+      input.value = '';
+      loadAttendance(date);
+    })
+    .catch(function(e) { showAllocError('Add SR failed: ' + e.message); });
 }
 
 // ── ALLOCATION ────────────────────────────────────────────────────────────────

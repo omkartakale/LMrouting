@@ -67,4 +67,19 @@ public class AttendanceController {
         attendanceManagerService.setAttendance(date, srName, present);
         return ResponseEntity.noContent().build();
     }
+
+    // -------------------------------------------------------------------------
+    // POST /api/attendance/sr — Add a new SR to the registry
+    // -------------------------------------------------------------------------
+
+    @PostMapping("/sr")
+    public ResponseEntity<Void> addSr(@RequestBody java.util.Map<String, String> body) {
+        String srName = body.get("srName");
+        if (srName == null || srName.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        log.info("AttendanceController: POST /api/attendance/sr — adding '{}'", srName.trim());
+        attendanceManagerService.addSr(srName.trim());
+        return ResponseEntity.noContent().build();
+    }
 }
