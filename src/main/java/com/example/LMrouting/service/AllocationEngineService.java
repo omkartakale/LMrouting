@@ -277,7 +277,7 @@ public class AllocationEngineService {
     }
 
     // =========================================================================
-    // Phase 1 — Angular sector partitioning
+    // Phase 1 — K-Means geographic clustering
     // =========================================================================
 
     Map<String, List<Shipment>> angularSectorPartition(List<Shipment> forwardShipments,
@@ -288,25 +288,126 @@ public class AllocationEngineService {
 
         if (forwardShipments.isEmpty()) return assignment;
 
+        // K-Means clustering for geographic grouping
+        int maxIter = 50;
+        int n = forwardShipments.size();
+
+        // Initialize centroids using evenly spaced angular sectors (better than random)
+        double[][] centroids = new double[k][2];
         List<Shipment> sorted = forwardShipments.stream()
                 .sorted(Comparator.comparingDouble(s ->
                         Math.atan2(s.getDropLongitude() - hubLng, s.getDropLatitude() - hubLat)))
                 .collect(Collectors.toList());
-
-        int total = sorted.size();
-        int baseSize = total / k;
-        int remainder = total % k;
-        int index = 0;
-
         for (int i = 0; i < k; i++) {
-            int bucketSize = baseSize + (i < remainder ? 1 : 0);
-            String sr = presentSrNames.get(i);
-            for (int j = 0; j < bucketSize; j++) {
-                assignment.get(sr).add(sorted.get(index++));
+            int idx = (int)((long)i * n / k);
+            centroids[i][0] = sorted.get(idx).getDropLatitude();
+            centroids[i][1] = sorted.get(idx).getDropLongitude();
+        }
+
+        // K-Means iterations
+        int[] labels = new int[n];
+        for (int iter = 0; iter < maxIter; iter++) {
+            boolean changed = false;
+
+            // Assign each shipment to nearest centroid
+            for (int i = 0; i < n; i++) {
+                Shipment s = forwardShipments.get(i);
+                double minDist = Double.MAX_VALUE;
+                int bestCluster = 0;
+                for (int c = 0; c < k; c++) {
+                    double dist = GoogleMapsService.haversine(
+                            s.getDropLatitude(), s.getDropLongitude(),
+                            centroids[c][0], centroids[c][1]);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bestCluster = c;
+                    }
+                }
+                if (labels[i] != bestCluster) {
+                    labels[i] = bestCluster;
+                    changed = true;
+                }
+            }
+
+            if (!changed) break;
+
+            // Recompute centroids
+            for (int c = 0; c < k; c++) {
+                double sumLat = 0, sumLng = 0;
+                int count = 0;
+                for (int i = 0; i < n; i++) {
+                    if (labels[i] == c) {
+                        sumLat += forwardShipments.get(i).getDropLatitude();
+                        sumLng += forwardShipments.get(i).getDropLongitude();
+                        count++;
+                    }
+                }
+                if (count > 0) {
+                    centroids[c][0] = sumLat / count;
+                    centroids[c][1] = sumLng / count;
+                }
             }
         }
 
-        log.debug("Phase 1: {} Forward shipments → {} SRs", total, k);
+        // Balance cluster sizes — move shipments from large clusters to small ones
+        // Target: each cluster should have roughly n/k shipments (±20%)
+        int targetSize = n / k;
+        int maxSize = (int)(targetSize * 1.2) + 1;
+
+        // Collect clusters
+        List<List<Integer>> clusters = new ArrayList<>();
+        for (int c = 0; c < k; c++) clusters.add(new ArrayList<>());
+        for (int i = 0; i < n; i++) clusters.get(labels[i]).add(i);
+
+        // Rebalance: move boundary points from oversized to undersized clusters
+        for (int pass = 0; pass < 20; pass++) {
+            boolean moved = false;
+            for (int c = 0; c < k; c++) {
+                while (clusters.get(c).size() > maxSize) {
+                    // Find the smallest cluster
+                    int smallest = -1;
+                    int smallestSize = Integer.MAX_VALUE;
+                    for (int j = 0; j < k; j++) {
+                        if (j != c && clusters.get(j).size() < smallestSize) {
+                            smallestSize = clusters.get(j).size();
+                            smallest = j;
+                        }
+                    }
+                    if (smallest < 0 || smallestSize >= maxSize) break;
+
+                    // Move the point closest to the smallest cluster's centroid
+                    double bestDist = Double.MAX_VALUE;
+                    int bestIdx = -1;
+                    for (int idx : clusters.get(c)) {
+                        Shipment s = forwardShipments.get(idx);
+                        double dist = GoogleMapsService.haversine(
+                                s.getDropLatitude(), s.getDropLongitude(),
+                                centroids[smallest][0], centroids[smallest][1]);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestIdx = idx;
+                        }
+                    }
+                    if (bestIdx >= 0) {
+                        clusters.get(c).remove(Integer.valueOf(bestIdx));
+                        clusters.get(smallest).add(bestIdx);
+                        labels[bestIdx] = smallest;
+                        moved = true;
+                    }
+                }
+            }
+            if (!moved) break;
+        }
+
+        // Assign to SR names
+        for (int c = 0; c < k; c++) {
+            String sr = presentSrNames.get(c);
+            for (int idx : clusters.get(c)) {
+                assignment.get(sr).add(forwardShipments.get(idx));
+            }
+        }
+
+        log.info("Phase 1: K-Means clustered {} shipments into {} geographic zones", n, k);
         return assignment;
     }
 
