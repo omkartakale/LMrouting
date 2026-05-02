@@ -82,6 +82,28 @@ public class AllocationController {
     }
 
     /**
+     * Get the ORS (OpenStreetMap) road polyline for an SR's route.
+     * GET /api/allocate/{date}/sr/{srName}/polyline/ors
+     */
+    @GetMapping("/{date}/sr/{srName}/polyline/ors")
+    public ResponseEntity<List<double[]>> getSrOrsPolyline(@PathVariable("date") String dateStr,
+                                                            @PathVariable("srName") String srName) {
+        List<double[]> polyline = allocationEngineService.getOrsPolyline(parseDate(dateStr), srName);
+        return ResponseEntity.ok(polyline);
+    }
+
+    /**
+     * Get the Google Maps road polyline for an SR's route.
+     * GET /api/allocate/{date}/sr/{srName}/polyline/google
+     */
+    @GetMapping("/{date}/sr/{srName}/polyline/google")
+    public ResponseEntity<List<double[]>> getSrGooglePolyline(@PathVariable("date") String dateStr,
+                                                               @PathVariable("srName") String srName) {
+        List<double[]> polyline = allocationEngineService.getGoogleMapsPolyline(parseDate(dateStr), srName);
+        return ResponseEntity.ok(polyline);
+    }
+
+    /**
      * Parse date strings in multiple formats:
      * - ISO: 2026-03-24
      * - dd-MMM-yy: 24-Mar-26

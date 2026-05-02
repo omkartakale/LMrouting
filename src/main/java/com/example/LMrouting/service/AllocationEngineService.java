@@ -236,6 +236,18 @@ public class AllocationEngineService {
         return routeOptimizerService.getRoutePolyline(shipments);
     }
 
+    public List<double[]> getOrsPolyline(LocalDate date, String srName) {
+        String dateStr = formatDate(date);
+        List<Shipment> shipments = store.findShipmentsByDateAndSr(dateStr, srName);
+        return routeOptimizerService.getOrsPolyline(shipments);
+    }
+
+    public List<double[]> getGoogleMapsPolyline(LocalDate date, String srName) {
+        String dateStr = formatDate(date);
+        List<Shipment> shipments = store.findShipmentsByDateAndSr(dateStr, srName);
+        return routeOptimizerService.getGoogleMapsPolyline(shipments);
+    }
+
     public SrRouteDto getSrRoute(LocalDate date, String srName) {
         String dateStr = formatDate(date);
         List<Shipment> shipments = store.findShipmentsByDateAndSr(dateStr, srName);

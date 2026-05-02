@@ -99,13 +99,29 @@ public class RouteOptimizerService {
      * Falls back to straight-line waypoints if no API is configured.
      */
     public List<double[]> getRoutePolyline(List<Shipment> orderedShipments) {
+        return getRoutePolylineInternal(orderedShipments, false);
+    }
+
+    /**
+     * Get Google Maps road polyline specifically.
+     * Used for the side-by-side comparison view.
+     * Falls back to straight lines if Google Maps key not configured.
+     */
+    public List<double[]> getGoogleMapsPolyline(List<Shipment> orderedShipments) {
+        return getRoutePolylineInternal(orderedShipments, true);
+    }
+
+    /**
+     * Get ORS road polyline specifically.
+     * Used for the side-by-side comparison view.
+     * Falls back to straight lines if ORS key not configured.
+     */
+    public List<double[]> getOrsPolyline(List<Shipment> orderedShipments) {
         if (orderedShipments == null || orderedShipments.isEmpty()) {
             return List.of(new double[]{hubLat, hubLng});
         }
-
-        // Build coordinate list: hub → stops → hub (ORS uses [lng, lat] order)
         List<double[]> orsCoords = new ArrayList<>();
-        orsCoords.add(new double[]{hubLng, hubLat}); // ORS: lng first
+        orsCoords.add(new double[]{hubLng, hubLat});
         for (Shipment s : orderedShipments) {
             orsCoords.add(new double[]{s.getDropLongitude(), s.getDropLatitude()});
         }
@@ -115,14 +131,61 @@ public class RouteOptimizerService {
             try {
                 OpenRouteService.RouteResult result = openRouteService.getRoute(orsCoords);
                 if (result.fromApi() && !result.polylinePoints().isEmpty()) {
-                    return result.polylinePoints(); // [lat, lng] pairs
+                    return result.polylinePoints();
+                }
+            } catch (Exception e) {
+                log.warn("RouteOptimizerService: ORS polyline failed — {}", e.getMessage());
+            }
+        }
+        return buildStraightLinePolyline(orderedShipments);
+    }
+
+    private List<double[]> getRoutePolylineInternal(List<Shipment> orderedShipments, boolean forceGoogle) {
+        if (orderedShipments == null || orderedShipments.isEmpty()) {
+            return List.of(new double[]{hubLat, hubLng});
+        }
+
+        // Try ORS first (unless forcing Google)
+        if (!forceGoogle && openRouteService.isConfigured()) {
+            List<double[]> orsCoords = new ArrayList<>();
+            orsCoords.add(new double[]{hubLng, hubLat});
+            for (Shipment s : orderedShipments) {
+                orsCoords.add(new double[]{s.getDropLongitude(), s.getDropLatitude()});
+            }
+            orsCoords.add(new double[]{hubLng, hubLat});
+            try {
+                OpenRouteService.RouteResult result = openRouteService.getRoute(orsCoords);
+                if (result.fromApi() && !result.polylinePoints().isEmpty()) {
+                    return result.polylinePoints();
                 }
             } catch (Exception e) {
                 log.warn("RouteOptimizerService: ORS polyline failed — {}", e.getMessage());
             }
         }
 
-        // Fallback: straight-line waypoints [lat, lng]
+        // Try Google Maps
+        if (googleMapsService.isApiKeyConfigured()) {
+            try {
+                List<double[]> waypoints = new ArrayList<>();
+                for (Shipment s : orderedShipments) {
+                    waypoints.add(new double[]{s.getDropLatitude(), s.getDropLongitude()});
+                }
+                GoogleMapsService.DirectionsResult result =
+                        googleMapsService.getOptimizedRoute(hubLat, hubLng, waypoints);
+                if (result.polylinePoints() != null && !result.polylinePoints().isEmpty()) {
+                    return result.polylinePoints().stream()
+                            .map(p -> new double[]{p.getLat(), p.getLng()})
+                            .collect(java.util.stream.Collectors.toList());
+                }
+            } catch (Exception e) {
+                log.warn("RouteOptimizerService: Google Maps polyline failed — {}", e.getMessage());
+            }
+        }
+
+        return buildStraightLinePolyline(orderedShipments);
+    }
+
+    private List<double[]> buildStraightLinePolyline(List<Shipment> orderedShipments) {
         List<double[]> fallback = new ArrayList<>();
         fallback.add(new double[]{hubLat, hubLng});
         for (Shipment s : orderedShipments) {

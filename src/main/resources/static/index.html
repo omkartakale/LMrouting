@@ -10,127 +10,140 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f0f2f5}
 #header{background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;padding:0 20px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.25);z-index:1000}
-#header h1{font-size:1.15rem;font-weight:700;letter-spacing:.3px}
-#header-right{display:flex;align-items:center;gap:12px;font-size:.82rem}
+#header h1{font-size:1.1rem;font-weight:700;letter-spacing:.3px}
+#header-right{display:flex;align-items:center;gap:8px;font-size:.78rem;flex-wrap:wrap}
 #hub-info{opacity:.9}
-#routing-badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:20px;padding:3px 10px;font-size:.78rem;white-space:nowrap}
+.api-badge{border-radius:20px;padding:2px 8px;font-size:.72rem;white-space:nowrap;border:1px solid rgba(255,255,255,.35)}
+.api-badge.active{background:rgba(67,160,71,.45);border-color:rgba(67,160,71,.7)}
+.api-badge.inactive{background:rgba(255,255,255,.12)}
 #main{display:flex;flex:1;overflow:hidden}
-#sidebar{width:420px;flex-shrink:0;overflow-y:auto;background:#f8f9fa;border-right:1px solid #dee2e6;display:flex;flex-direction:column}
+#sidebar{width:430px;flex-shrink:0;overflow-y:auto;background:#f8f9fa;border-right:1px solid #dee2e6;display:flex;flex-direction:column}
 #sidebar::-webkit-scrollbar{width:6px}
 #sidebar::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:3px}
 #map-container{flex:1;position:relative}
 #map{width:100%;height:100%}
-.panel{background:#fff;border-bottom:1px solid #e9ecef;padding:16px}
-.panel-title{font-size:.9rem;font-weight:700;color:#343a40;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
-.panel-title span.badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600}
-#drop-zone{border:2px dashed #adb5bd;border-radius:8px;padding:24px 16px;text-align:center;cursor:pointer;transition:all .2s;color:#6c757d;font-size:.85rem;background:#fafbfc;user-select:none}
+.panel{background:#fff;border-bottom:1px solid #e9ecef;padding:14px 16px}
+.panel-title{font-size:.88rem;font-weight:700;color:#343a40;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel-title span.badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.7rem;font-weight:600}
+#drop-zone{border:2px dashed #adb5bd;border-radius:8px;padding:20px 14px;text-align:center;cursor:pointer;transition:all .2s;color:#6c757d;font-size:.83rem;background:#fafbfc;user-select:none}
 #drop-zone:hover,#drop-zone.drag-over{border-color:#1976d2;background:#e8f0fe;color:#1565c0}
-#drop-zone svg{display:block;margin:0 auto 8px}
-#file-info{margin-top:8px;font-size:.8rem;color:#495057;display:none;line-height:1.5}
-#upload-btn{margin-top:10px;width:100%;padding:9px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:.85rem;font-weight:600;cursor:pointer;transition:background .2s;display:none}
+#drop-zone svg{display:block;margin:0 auto 6px}
+#file-info{margin-top:7px;font-size:.78rem;color:#495057;display:none;line-height:1.5}
+#upload-btn{margin-top:8px;width:100%;padding:8px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:.83rem;font-weight:600;cursor:pointer;transition:background .2s;display:none}
 #upload-btn:hover:not(:disabled){background:#1565c0}
 #upload-btn:disabled{background:#90a4ae;cursor:not-allowed}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.result-card{margin-top:10px;padding:12px;border-radius:8px;font-size:.82rem}
+.result-card{margin-top:8px;padding:10px;border-radius:8px;font-size:.8rem}
 .result-card.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
 .result-card.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
 .result-card.info{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
-.result-card .stat-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.result-card .stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
 .result-card .stat{text-align:center}
-.result-card .stat .val{font-size:1.2rem;font-weight:700}
-.result-card .stat .lbl{font-size:.72rem;color:#555;margin-top:1px}
-.date-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.date-chip{background:#1976d2;color:#fff;border:none;border-radius:14px;padding:3px 10px;font-size:.75rem;cursor:pointer;transition:background .2s}
+.result-card .stat .val{font-size:1.1rem;font-weight:700}
+.result-card .stat .lbl{font-size:.7rem;color:#555;margin-top:1px}
+.date-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.date-chip{background:#1976d2;color:#fff;border:none;border-radius:14px;padding:2px 9px;font-size:.73rem;cursor:pointer;transition:background .2s}
 .date-chip:hover{background:#1565c0}
-.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;font-size:.8rem;font-weight:600;user-select:none}
-.collapsible-header .arrow{transition:transform .2s;font-size:.7rem}
+.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:5px 0;font-size:.78rem;font-weight:600;user-select:none}
+.collapsible-header .arrow{transition:transform .2s;font-size:.68rem}
 .collapsible-header.open .arrow{transform:rotate(180deg)}
-.collapsible-body{display:none;font-size:.78rem;max-height:120px;overflow-y:auto;padding:4px 0}
+.collapsible-body{display:none;font-size:.76rem;max-height:100px;overflow-y:auto;padding:3px 0}
 .collapsible-body.open{display:block}
-.warn-section{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:8px 10px;margin-top:8px}
-.err-section{background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:8px 10px;margin-top:8px}
+.warn-section{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:7px 9px;margin-top:7px}
+.err-section{background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:7px 9px;margin-top:7px}
 .warn-section .collapsible-header{color:#e65100}
 .err-section .collapsible-header{color:#b71c1c}
 .warn-item,.err-item{padding:2px 0;border-bottom:1px solid rgba(0,0,0,.06);line-height:1.4}
-select{width:100%;padding:7px 10px;border:1px solid #ced4da;border-radius:6px;font-size:.85rem;background:#fff;color:#343a40;margin-bottom:10px}
+select{width:100%;padding:6px 9px;border:1px solid #ced4da;border-radius:6px;font-size:.83rem;background:#fff;color:#343a40;margin-bottom:8px}
 select:focus{outline:none;border-color:#1976d2;box-shadow:0 0 0 2px rgba(25,118,210,.15)}
-.btn-row{display:flex;gap:8px;flex-wrap:wrap}
-.btn{padding:7px 14px;border:none;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn-row{display:flex;gap:6px;flex-wrap:wrap}
+.btn{padding:7px 12px;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
 .btn-primary{background:#1976d2;color:#fff}
 .btn-primary:hover:not(:disabled){background:#1565c0}
 .btn-primary:disabled{background:#90a4ae;cursor:not-allowed}
+.btn-google{background:#1b8a3c;color:#fff;border:2px solid #155d2a}
+.btn-google:hover:not(:disabled){background:#155d2a}
+.btn-google:disabled{background:#90a4ae;border-color:#90a4ae;cursor:not-allowed}
+.btn-compare{background:#6a1b9a;color:#fff}
+.btn-compare:hover:not(:disabled){background:#4a148c}
+.btn-compare:disabled{background:#90a4ae;cursor:not-allowed}
 .btn-secondary{background:#e9ecef;color:#495057;border:1px solid #ced4da}
 .btn-secondary:hover:not(:disabled){background:#dee2e6}
 .btn-secondary:disabled{opacity:.5;cursor:not-allowed}
-.banner{padding:8px 12px;border-radius:6px;font-size:.82rem;font-weight:600;margin-top:8px;display:none}
+.banner{padding:7px 10px;border-radius:6px;font-size:.8rem;font-weight:600;margin-top:7px;display:none}
 .banner.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
 .banner.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
-.sr-attendance-item{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f3f5;font-size:.83rem}
+.banner.info{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
+.sr-attendance-item{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f3f5;font-size:.81rem}
 .sr-attendance-item:last-child{border-bottom:none}
-.toggle-switch{position:relative;display:inline-block;width:38px;height:20px;flex-shrink:0}
+.toggle-switch{position:relative;display:inline-block;width:36px;height:19px;flex-shrink:0}
 .toggle-switch input{opacity:0;width:0;height:0}
-.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:20px;transition:.3s}
-.toggle-slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:19px;transition:.3s}
+.toggle-slider:before{content:'';position:absolute;width:13px;height:13px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
 input:checked+.toggle-slider{background:#43a047}
-input:checked+.toggle-slider:before{transform:translateX(18px)}
+input:checked+.toggle-slider:before{transform:translateX(17px)}
 .toggle-switch input:disabled+.toggle-slider{opacity:.5;cursor:not-allowed}
-.summary-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.stat-box{background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;padding:10px;text-align:center}
-.stat-box .val{font-size:1.3rem;font-weight:700;color:#1565c0}
-.stat-box .lbl{font-size:.72rem;color:#6c757d;margin-top:2px}
-.sr-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid transparent;margin-bottom:4px}
+.summary-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.stat-box{background:#f8f9fa;border:1px solid #e9ecef;border-radius:7px;padding:9px;text-align:center}
+.stat-box .val{font-size:1.2rem;font-weight:700;color:#1565c0}
+.stat-box .lbl{font-size:.7rem;color:#6c757d;margin-top:2px}
+.sr-item{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer;transition:background .15s;border:1px solid transparent;margin-bottom:3px}
 .sr-item:hover{background:#e8f0fe;border-color:#bbdefb}
 .sr-item.active{background:#e3f2fd;border-color:#1976d2}
-.sr-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.sr-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
 .sr-item-info{flex:1;min-width:0}
-.sr-item-name{font-size:.85rem;font-weight:600;color:#212529}
-.sr-item-sub{font-size:.73rem;color:#6c757d;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-item-badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:700;flex-shrink:0}
-.route-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
-.stop-list{max-height:280px;overflow-y:auto}
+.sr-item-name{font-size:.83rem;font-weight:600;color:#212529}
+.sr-item-sub{font-size:.71rem;color:#6c757d;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-item-badge{background:#1976d2;color:#fff;border-radius:11px;padding:2px 7px;font-size:.7rem;font-weight:700;flex-shrink:0}
+.route-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px}
+.stop-list{max-height:260px;overflow-y:auto}
 .stop-list::-webkit-scrollbar{width:4px}
 .stop-list::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:2px}
-.stop-item{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid #f1f3f5;font-size:.8rem;cursor:pointer}
+.stop-item{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid #f1f3f5;font-size:.78rem;cursor:pointer}
 .stop-item:hover{background:#f8f9fa}
 .stop-item:last-child{border-bottom:none}
-.stop-seq{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
+.stop-seq{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
 .stop-info{flex:1;min-width:0}
 .stop-pincode{font-weight:600;color:#212529}
-.stop-id{color:#6c757d;font-size:.75rem;margin-top:1px;word-break:break-all}
-.stop-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
-.stop-tag{background:#e9ecef;color:#495057;border-radius:4px;padding:1px 5px;font-size:.7rem}
+.stop-id{color:#6c757d;font-size:.72rem;margin-top:1px;word-break:break-all}
+.stop-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+.stop-tag{background:#e9ecef;color:#495057;border-radius:4px;padding:1px 4px;font-size:.68rem}
 .stop-tag.override{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
 .stop-tag.oor{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
 .stop-tag.heavy{background:#f3e5f5;color:#6a1b9a}
-#map-legend{position:absolute;bottom:24px;left:10px;z-index:1000;background:rgba(255,255,255,.95);border:1px solid #dee2e6;border-radius:8px;padding:10px 12px;font-size:.75rem;max-height:220px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.12)}
-#map-legend h4{font-size:.78rem;font-weight:700;margin-bottom:6px;color:#343a40}
-.legend-item{display:flex;align-items:center;gap:6px;padding:2px 0}
-.legend-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+#map-legend{position:absolute;bottom:20px;left:10px;z-index:1000;background:rgba(255,255,255,.96);border:1px solid #dee2e6;border-radius:8px;padding:9px 11px;font-size:.73rem;max-height:240px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+#map-legend h4{font-size:.76rem;font-weight:700;margin-bottom:5px;color:#343a40}
+.legend-item{display:flex;align-items:center;gap:5px;padding:2px 0}
+.legend-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.legend-line{width:22px;height:3px;flex-shrink:0;border-radius:2px}
+.legend-line.dashed{background:repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px)}
+/* Comparison mode indicator */
+#compare-banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(106,27,154,.9);color:#fff;padding:5px 14px;border-radius:20px;font-size:.78rem;font-weight:600;display:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 dialog{border:none;border-radius:12px;padding:0;box-shadow:0 8px 32px rgba(0,0,0,.25);max-width:400px;width:90%}
 dialog::backdrop{background:rgba(0,0,0,.45)}
-.modal-header{background:#1976d2;color:#fff;padding:14px 18px;border-radius:12px 12px 0 0;font-weight:700;font-size:.95rem}
-.modal-body{padding:16px 18px}
-.modal-info{background:#f8f9fa;border-radius:6px;padding:10px;margin-bottom:12px;font-size:.83rem}
+.modal-header{background:#1976d2;color:#fff;padding:13px 17px;border-radius:12px 12px 0 0;font-weight:700;font-size:.93rem}
+.modal-body{padding:15px 17px}
+.modal-info{background:#f8f9fa;border-radius:6px;padding:9px;margin-bottom:10px;font-size:.81rem}
 .modal-info strong{color:#1565c0}
-.sr-radio-list{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
-.sr-radio-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #dee2e6;border-radius:6px;cursor:pointer;transition:background .15s;font-size:.83rem}
+.sr-radio-list{max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:5px}
+.sr-radio-item{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #dee2e6;border-radius:6px;cursor:pointer;transition:background .15s;font-size:.81rem}
 .sr-radio-item:hover{background:#e8f0fe}
 .sr-radio-item input{accent-color:#1976d2}
-.modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e9ecef}
-.leaflet-popup-content{font-size:.82rem;min-width:180px}
-.popup-title{font-weight:700;font-size:.88rem;margin-bottom:6px;color:#1565c0}
-.popup-row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid #f1f3f5}
+.modal-footer{display:flex;justify-content:flex-end;gap:7px;padding:11px 17px;border-top:1px solid #e9ecef}
+.leaflet-popup-content{font-size:.8rem;min-width:175px}
+.popup-title{font-weight:700;font-size:.86rem;margin-bottom:5px;color:#1565c0}
+.popup-row{display:flex;justify-content:space-between;gap:7px;padding:2px 0;border-bottom:1px solid #f1f3f5}
 .popup-row:last-of-type{border-bottom:none}
 .popup-label{color:#6c757d}
 .popup-val{font-weight:600;color:#212529}
-.popup-oor{background:#ffebee;color:#c62828;border-radius:4px;padding:1px 6px;font-size:.72rem;font-weight:700;display:inline-block;margin-top:4px}
-.popup-reassign{margin-top:8px;width:100%;padding:5px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:.78rem;font-weight:600;cursor:pointer}
+.popup-oor{background:#ffebee;color:#c62828;border-radius:4px;padding:1px 5px;font-size:.7rem;font-weight:700;display:inline-block;margin-top:3px}
+.popup-reassign{margin-top:7px;width:100%;padding:5px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:.76rem;font-weight:600;cursor:pointer}
 .popup-reassign:hover{background:#1565c0}
 .hidden{display:none!important}
-.loading-text{color:#6c757d;font-size:.82rem;text-align:center;padding:12px 0}
-.empty-text{color:#adb5bd;font-size:.82rem;text-align:center;padding:16px 0;font-style:italic}
-</style>
+.loading-text{color:#6c757d;font-size:.8rem;text-align:center;padding:10px 0}
+.empty-text{color:#adb5bd;font-size:.8rem;text-align:center;padding:14px 0;font-style:italic}
+  </style>
 </head>
 <body>
 
@@ -138,17 +151,19 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   <h1>&#x1F69A; Shipment Allocation Optimizer</h1>
   <div id="header-right">
     <span id="hub-info">Hub</span>
-    <span id="routing-badge">Loading...</span>
+    <span class="api-badge inactive" id="badge-osm">OSM</span>
+    <span class="api-badge inactive" id="badge-google">Google Maps</span>
   </div>
 </header>
 
 <div id="main">
   <aside id="sidebar">
 
+    <!-- Upload -->
     <div class="panel">
       <div class="panel-title">Upload Shipment File</div>
       <div id="drop-zone">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#adb5bd" stroke-width="1.5">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#adb5bd" stroke-width="1.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="17 8 12 3 7 8"/>
           <line x1="12" y1="3" x2="12" y2="15"/>
@@ -161,46 +176,62 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div id="upload-result"></div>
     </div>
 
+    <!-- Allocation -->
     <div class="panel">
       <div class="panel-title">Allocation</div>
       <select id="date-select">
         <option value="">-- Select date --</option>
       </select>
+      <div class="btn-row" style="margin-bottom:6px">
+        <button class="btn btn-primary" id="run-osm-btn" title="Allocate routes using OpenStreetMap (ORS) road data">
+          &#x1F5FA; Run Allocation (OSM)
+        </button>
+        <button class="btn btn-google" id="run-google-btn" title="Allocate routes using Google Maps road data — requires Google Maps API key">
+          &#x1F5FA; Run Allocation (Google Maps)
+        </button>
+      </div>
       <div class="btn-row">
-        <button class="btn btn-primary" id="run-btn">Run Allocation</button>
-        <button class="btn btn-secondary" id="undo-btn" disabled>Undo</button>
-        <button class="btn btn-secondary" id="finalize-btn" disabled>Finalize</button>
+        <button class="btn btn-compare" id="compare-btn" disabled title="Show both OSM and Google Maps routes side by side for comparison">
+          &#x1F50D; Compare Routes
+        </button>
+        <button class="btn btn-secondary" id="undo-btn" disabled>&#x21A9; Undo</button>
+        <button class="btn btn-secondary" id="finalize-btn" disabled>&#x2705; Finalize</button>
       </div>
       <div id="alloc-error" class="banner error"></div>
-      <div id="finalized-banner" class="banner success">Allocation finalized - overrides locked</div>
+      <div id="alloc-info" class="banner info"></div>
+      <div id="finalized-banner" class="banner success">&#x2705; Allocation finalized - overrides locked</div>
     </div>
 
+    <!-- Attendance -->
     <div class="panel">
       <div class="panel-title">
         SR Attendance
         <span class="badge" id="present-count-badge">0 present</span>
       </div>
-      <div style="display:flex;gap:6px;margin-bottom:10px">
-        <button class="btn btn-secondary" id="mark-all-btn" style="flex:1;font-size:.78rem" onclick="markAllPresent()">All Present</button>
-        <button class="btn btn-secondary" id="mark-none-btn" style="flex:1;font-size:.78rem" onclick="markNonePresent()">All Absent</button>
+      <div style="display:flex;gap:5px;margin-bottom:8px">
+        <button class="btn btn-secondary" style="flex:1;font-size:.76rem" onclick="markAllPresent()">All Present</button>
+        <button class="btn btn-secondary" style="flex:1;font-size:.76rem" onclick="markNonePresent()">All Absent</button>
       </div>
-      <div style="display:flex;gap:6px;margin-bottom:10px">
-        <input type="text" id="new-sr-input" placeholder="New SR name (e.g. SR-011)" style="flex:1;padding:6px 8px;border:1px solid #ced4da;border-radius:6px;font-size:.82rem"/>
-        <button class="btn btn-primary" style="font-size:.78rem;white-space:nowrap" onclick="addNewSr()">+ Add SR</button>
+      <div style="display:flex;gap:5px;margin-bottom:8px">
+        <input type="text" id="new-sr-input" placeholder="New SR name (e.g. SR-011)" style="flex:1;padding:5px 7px;border:1px solid #ced4da;border-radius:6px;font-size:.8rem"/>
+        <button class="btn btn-primary" style="font-size:.76rem;white-space:nowrap" onclick="addNewSr()">+ Add SR</button>
       </div>
       <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
     </div>
 
+    <!-- Summary -->
     <div class="panel hidden" id="summary-panel">
-      <div class="panel-title">Summary</div>
+      <div class="panel-title">Summary <span id="summary-mode-badge" style="font-size:.7rem;background:#e9ecef;color:#495057;border-radius:10px;padding:1px 7px;font-weight:600"></span></div>
       <div class="summary-stats" id="summary-stats"></div>
     </div>
 
+    <!-- SR List -->
     <div class="panel hidden" id="sr-list-panel">
       <div class="panel-title">Service Representatives</div>
       <div id="sr-list"></div>
     </div>
 
+    <!-- Route Details -->
     <div class="panel hidden" id="route-panel">
       <div class="panel-title" id="route-panel-title">Route</div>
       <div class="route-stats" id="route-stats"></div>
@@ -211,18 +242,19 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
   <div id="map-container">
     <div id="map"></div>
+    <div id="compare-banner">&#x1F50D; Comparison Mode: OSM (solid) vs Google Maps (dashed)</div>
     <div id="map-legend">
-      <h4>Legend</h4>
+      <h4>&#x1F5FA;&#xFE0F; Legend</h4>
       <div id="legend-items"></div>
     </div>
   </div>
 </div>
 
 <dialog id="override-modal">
-  <div class="modal-header">Reassign Shipment</div>
+  <div class="modal-header">&#x1F504; Reassign Shipment</div>
   <div class="modal-body">
     <div class="modal-info" id="modal-info"></div>
-    <div style="font-size:.82rem;font-weight:600;margin-bottom:8px;color:#343a40">Select new SR:</div>
+    <div style="font-size:.8rem;font-weight:600;margin-bottom:7px;color:#343a40">Select new SR:</div>
     <div class="sr-radio-list" id="sr-radio-list"></div>
   </div>
   <div class="modal-footer">
@@ -237,6 +269,8 @@ var HUB_LNG = 73.8884305;
 var SR_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#c0ca33','#6d4c41','#546e7a','#d81b60','#039be5','#00897b','#ffb300','#5e35b1','#1565c0','#2e7d32','#ef6c00'];
 
 var map, hubMarker;
+// srLayers stores per-SR map objects
+// Each entry: { markers:[], osmPolyline, googlePolyline, color, index }
 var srLayers = {};
 var currentSrName = null;
 var currentSrIndex = 0;
@@ -244,19 +278,31 @@ var allocationFinalized = false;
 var presentSrNames = [];
 var pendingReassign = null;
 var selectedFile = null;
+var lastAllocationMode = null; // 'osm' or 'google'
+var hasOsmAllocation = false;
+var hasGoogleAllocation = false;
+var googleMapsConfigured = false;
+var orsConfigured = false;
 
 function esc(s) {
   if (s == null) return '';
-  var div = document.createElement('div');
-  div.appendChild(document.createTextNode(String(s)));
-  return div.innerHTML;
+  var d = document.createElement('div');
+  d.appendChild(document.createTextNode(String(s)));
+  return d.innerHTML;
 }
 
 function showAllocError(msg) {
   var el = document.getElementById('alloc-error');
   el.textContent = msg;
   el.style.display = 'block';
-  setTimeout(function() { el.style.display = 'none'; }, 8000);
+  setTimeout(function() { el.style.display = 'none'; }, 9000);
+}
+
+function showAllocInfo(msg) {
+  var el = document.getElementById('alloc-info');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(function() { el.style.display = 'none'; }, 6000);
 }
 
 function hideAllocError() {
@@ -274,11 +320,9 @@ function initMap() {
     icon: L.divIcon({
       className: '',
       html: '<div style="width:20px;height:20px;background:#e53935;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
+      iconSize: [20, 20], iconAnchor: [10, 10]
     }),
-    zIndexOffset: 1000,
-    title: 'Hub'
+    zIndexOffset: 1000, title: 'Hub'
   }).addTo(map).bindPopup('<b>Hub</b>');
 
   loadConfig();
@@ -288,26 +332,48 @@ function loadConfig() {
   fetch('/api/hub')
     .then(function(r) { return r.json(); })
     .then(function(hub) {
-      document.getElementById('hub-info').textContent = hub.hubName + ' - ' + hub.hubLat + ', ' + hub.hubLng;
+      HUB_LAT = hub.hubLat;
+      HUB_LNG = hub.hubLng;
+      document.getElementById('hub-info').textContent = hub.hubName + ' (' + hub.hubLat.toFixed(4) + ', ' + hub.hubLng.toFixed(4) + ')';
+      map.setView([HUB_LAT, HUB_LNG], 13);
+      hubMarker.setLatLng([HUB_LAT, HUB_LNG]);
     })
     .catch(function() {});
 
   fetch('/api/config')
     .then(function(r) { return r.json(); })
     .then(function(cfg) {
-      var b = document.getElementById('routing-badge');
-      if (cfg.orsConfigured) {
-        b.textContent = 'Real Roads (ORS)';
-        b.style.background = 'rgba(67,160,71,.35)';
-      } else if (cfg.googleMapsConfigured) {
-        b.textContent = 'Real Roads (Google)';
-        b.style.background = 'rgba(67,160,71,.35)';
+      googleMapsConfigured = cfg.googleMapsConfigured === true;
+      orsConfigured = cfg.orsConfigured === true;
+
+      var osmBadge = document.getElementById('badge-osm');
+      var googleBadge = document.getElementById('badge-google');
+
+      if (orsConfigured) {
+        osmBadge.textContent = 'OSM Active';
+        osmBadge.className = 'api-badge active';
       } else {
-        b.textContent = 'Straight Lines';
+        osmBadge.textContent = 'OSM (straight lines)';
+        osmBadge.className = 'api-badge inactive';
+      }
+
+      if (googleMapsConfigured) {
+        googleBadge.textContent = 'Google Maps Active';
+        googleBadge.className = 'api-badge active';
+      } else {
+        googleBadge.textContent = 'Google Maps (not configured)';
+        googleBadge.className = 'api-badge inactive';
+      }
+
+      // Disable Google button if not configured
+      if (!googleMapsConfigured) {
+        document.getElementById('run-google-btn').disabled = true;
+        document.getElementById('run-google-btn').title = 'Google Maps API key not configured. Add it to application.properties.';
       }
     })
     .catch(function() {
-      document.getElementById('routing-badge').textContent = 'Straight Lines';
+      document.getElementById('badge-osm').textContent = 'OSM';
+      document.getElementById('badge-google').textContent = 'Google Maps';
     });
 }
 
@@ -317,207 +383,121 @@ function initUpload() {
   var fi = document.getElementById('csv-file-input');
   var ub = document.getElementById('upload-btn');
 
-  dz.addEventListener('click', function() {
-    fi.value = '';
-    fi.click();
-  });
-
-  dz.addEventListener('dragover', function(e) {
-    e.preventDefault();
-    dz.classList.add('drag-over');
-  });
-
-  dz.addEventListener('dragleave', function() {
-    dz.classList.remove('drag-over');
-  });
-
+  dz.addEventListener('click', function() { fi.value = ''; fi.click(); });
+  dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', function() { dz.classList.remove('drag-over'); });
   dz.addEventListener('drop', function(e) {
-    e.preventDefault();
-    dz.classList.remove('drag-over');
-    var f = e.dataTransfer.files[0];
-    if (f) handleFileSelected(f);
+    e.preventDefault(); dz.classList.remove('drag-over');
+    var f = e.dataTransfer.files[0]; if (f) handleFileSelected(f);
   });
-
-  fi.addEventListener('change', function() {
-    if (fi.files && fi.files[0]) {
-      handleFileSelected(fi.files[0]);
-    }
+  fi.addEventListener('change', function() { if (fi.files && fi.files[0]) handleFileSelected(fi.files[0]);
   });
-
-  ub.addEventListener('click', function() {
-    doUpload();
-  });
+  ub.addEventListener('click', function() { doUpload(); });
 }
 
 function handleFileSelected(f) {
   selectedFile = null;
   var info = document.getElementById('file-info');
-  var btn = document.getElementById('upload-btn');
-  var result = document.getElementById('upload-result');
-
-  result.innerHTML = '';
-  info.style.display = 'none';
-  btn.style.display = 'none';
+  var btn  = document.getElementById('upload-btn');
+  var res  = document.getElementById('upload-result');
+  res.innerHTML = ''; info.style.display = 'none'; btn.style.display = 'none';
 
   var ext = f.name.split('.').pop().toLowerCase();
-  var allowed = ['csv', 'txt', 'xlsx', 'xls'];
-
-  if (allowed.indexOf(ext) === -1) {
-    info.innerHTML = '<span style="color:#c62828">Invalid file type: .' + esc(ext) + '. Allowed: .csv .xlsx .xls</span>';
-    info.style.display = 'block';
-    return;
+  if (['csv','txt','xlsx','xls'].indexOf(ext) === -1) {
+    info.innerHTML = '<span style="color:#c62828">Invalid type: .' + esc(ext) + '. Allowed: .csv .xlsx .xls</span>';
+    info.style.display = 'block'; return;
   }
-
   if (f.size > 20 * 1024 * 1024) {
-    info.innerHTML = '<span style="color:#c62828">File too large (' + (f.size / 1024 / 1024).toFixed(1) + ' MB). Max 20 MB.</span>';
-    info.style.display = 'block';
-    return;
+    info.innerHTML = '<span style="color:#c62828">File too large (' + (f.size/1024/1024).toFixed(1) + ' MB). Max 20 MB.</span>';
+    info.style.display = 'block'; return;
   }
-
   selectedFile = f;
-  var sizeMB = (f.size / 1024 / 1024).toFixed(2);
-  info.innerHTML = 'File: <strong>' + esc(f.name) + '</strong> (' + sizeMB + ' MB) - Ready to upload';
+  info.innerHTML = 'File: <strong>' + esc(f.name) + '</strong> (' + (f.size/1024/1024).toFixed(2) + ' MB) — Ready';
   info.style.display = 'block';
-  btn.style.display = 'block';
-  btn.disabled = false;
-  btn.textContent = 'Upload';
+  btn.style.display = 'block'; btn.disabled = false; btn.textContent = 'Upload';
 }
 
 function doUpload() {
   if (!selectedFile) return;
-
   var btn = document.getElementById('upload-btn');
-  var result = document.getElementById('upload-result');
-
+  var res = document.getElementById('upload-result');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Uploading...';
-  result.innerHTML = '<div class="result-card info">Parsing file, please wait...</div>';
-
-  var fd = new FormData();
-  fd.append('file', selectedFile);
-
+  res.innerHTML = '<div class="result-card info">Parsing file, please wait...</div>';
+  var fd = new FormData(); fd.append('file', selectedFile);
   fetch('/api/csv/upload', { method: 'POST', body: fd })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
     .then(function(r) {
-      return r.json().then(function(d) {
-        return { ok: r.ok, status: r.status, data: d };
-      });
-    })
-    .then(function(res) {
-      btn.disabled = false;
-      btn.textContent = 'Re-upload';
-
-      if (!res.ok) {
-        var msg = (res.data && res.data.error) ? res.data.error : 'Upload failed (HTTP ' + res.status + ')';
-        result.innerHTML = '<div class="result-card error">Error: ' + esc(msg) + '</div>';
+      btn.disabled = false; btn.textContent = 'Re-upload';
+      if (!r.ok) {
+        res.innerHTML = '<div class="result-card error">Error: ' + esc((r.data && r.data.error) ? r.data.error : 'Upload failed (HTTP ' + r.status + ')') + '</div>';
         return;
       }
-
-      renderUploadResult(res.data);
+      renderUploadResult(r.data);
     })
-    .catch(function(err) {
-      btn.disabled = false;
-      btn.textContent = 'Retry';
-      result.innerHTML = '<div class="result-card error">Network error: ' + esc(err.message) + '</div>';
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = 'Retry';
+      res.innerHTML = '<div class="result-card error">Network error: ' + esc(e.message) + '</div>';
     });
 }
 
 function renderUploadResult(data) {
-  var result = document.getElementById('upload-result');
-  var html = '<div class="result-card success">';
-  html += '<div style="font-weight:700;margin-bottom:8px">File uploaded successfully</div>';
-  html += '<div class="stat-row">';
-  html += statBox(data.totalRows, 'Total Rows');
-  html += statBox(data.validCount, 'Valid');
-  html += statBox(data.skippedCount, 'Skipped');
-  html += statBox(data.outOfRangeCount, 'Out-of-Range');
-  html += '</div>';
-
+  var res = document.getElementById('upload-result');
+  var h = '<div class="result-card success"><div style="font-weight:700;margin-bottom:6px">File uploaded successfully</div>';
+  h += '<div class="stat-row">';
+  h += statBox(data.totalRows,'Total Rows') + statBox(data.validCount,'Valid') + statBox(data.skippedCount,'Skipped') + statBox(data.outOfRangeCount,'Out-of-Range');
+  h += '</div>';
   if (data.datesFound && data.datesFound.length) {
-    html += '<div style="font-size:.78rem;font-weight:600;margin-bottom:4px;margin-top:4px">Dates found:</div>';
-    html += '<div class="date-chips">';
-    data.datesFound.forEach(function(d) {
-      html += '<button class="date-chip" onclick="selectDate(\'' + esc(d) + '\')">' + esc(d) + '</button>';
-    });
-    html += '</div>';
+    h += '<div style="font-size:.76rem;font-weight:600;margin-bottom:3px;margin-top:3px">Dates found:</div><div class="date-chips">';
+    data.datesFound.forEach(function(d) { h += '<button class="date-chip" onclick="selectDate(\'' + esc(d) + '\')">' + esc(d) + '</button>'; });
+    h += '</div>';
   }
-
   if (data.warnings && data.warnings.length) {
-    html += '<div class="warn-section">';
-    html += '<div class="collapsible-header" onclick="toggleCollapsible(this)">';
-    html += data.warnings.length + ' warning(s) <span class="arrow">v</span></div>';
-    html += '<div class="collapsible-body">';
-    data.warnings.forEach(function(w) { html += '<div class="warn-item">' + esc(w) + '</div>'; });
-    html += '</div></div>';
+    h += '<div class="warn-section"><div class="collapsible-header" onclick="toggleCollapsible(this)">' + data.warnings.length + ' warning(s) <span class="arrow">v</span></div><div class="collapsible-body">';
+    data.warnings.forEach(function(w) { h += '<div class="warn-item">' + esc(w) + '</div>'; });
+    h += '</div></div>';
   }
-
   if (data.errors && data.errors.length) {
-    html += '<div class="err-section">';
-    html += '<div class="collapsible-header" onclick="toggleCollapsible(this)">';
-    html += data.errors.length + ' row error(s) <span class="arrow">v</span></div>';
-    html += '<div class="collapsible-body">';
-    data.errors.forEach(function(e) { html += '<div class="err-item">' + esc(e) + '</div>'; });
-    html += '</div></div>';
+    h += '<div class="err-section"><div class="collapsible-header" onclick="toggleCollapsible(this)">' + data.errors.length + ' row error(s) <span class="arrow">v</span></div><div class="collapsible-body">';
+    data.errors.forEach(function(e) { h += '<div class="err-item">' + esc(e) + '</div>'; });
+    h += '</div></div>';
   }
-
-  html += '</div>';
-  result.innerHTML = html;
-
+  h += '</div>';
+  res.innerHTML = h;
   populateDateSelector(data.datesFound || []);
   if (data.primaryDate) selectDate(data.primaryDate);
 }
 
-function statBox(val, lbl) {
-  return '<div class="stat"><div class="val">' + val + '</div><div class="lbl">' + lbl + '</div></div>';
-}
+function statBox(v, l) { return '<div class="stat"><div class="val">' + v + '</div><div class="lbl">' + l + '</div></div>'; }
+function sb(v, l) { return '<div class="stat-box"><div class="val">' + v + '</div><div class="lbl">' + l + '</div></div>'; }
+function toggleCollapsible(h) { h.classList.toggle('open'); h.nextElementSibling.classList.toggle('open'); }
 
-function sb(val, lbl) {
-  return '<div class="stat-box"><div class="val">' + val + '</div><div class="lbl">' + lbl + '</div></div>';
-}
-
-function toggleCollapsible(h) {
-  h.classList.toggle('open');
-  h.nextElementSibling.classList.toggle('open');
-}
-
-// ── DATE SELECTOR ─────────────────────────────────────────────────────────────
+// ── DATE ──────────────────────────────────────────────────────────────────────
 function populateDateSelector(dates) {
-  var sel = document.getElementById('date-select');
-  var cur = sel.value;
+  var sel = document.getElementById('date-select'), cur = sel.value;
   sel.innerHTML = '<option value="">-- Select date --</option>';
   dates.forEach(function(d) {
-    var o = document.createElement('option');
-    o.value = d;
-    o.textContent = d;
-    if (d === cur) o.selected = true;
-    sel.appendChild(o);
+    var o = document.createElement('option'); o.value = d; o.textContent = d;
+    if (d === cur) o.selected = true; sel.appendChild(o);
   });
 }
 
 function selectDate(date) {
-  var sel = document.getElementById('date-select');
-  var found = false;
-  for (var i = 0; i < sel.options.length; i++) {
-    if (sel.options[i].value === date) { found = true; break; }
-  }
-  if (!found) {
-    var o = document.createElement('option');
-    o.value = date;
-    o.textContent = date;
-    sel.appendChild(o);
-  }
-  sel.value = date;
-  onDateChange();
+  var sel = document.getElementById('date-select'), found = false;
+  for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === date) { found = true; break; } }
+  if (!found) { var o = document.createElement('option'); o.value = date; o.textContent = date; sel.appendChild(o); }
+  sel.value = date; onDateChange();
 }
 
 function onDateChange() {
-  var date = document.getElementById('date-select').value;
-  if (!date) return;
+  var date = document.getElementById('date-select').value; if (!date) return;
   allocationFinalized = false;
   document.getElementById('finalized-banner').style.display = 'none';
   document.getElementById('undo-btn').disabled = true;
   document.getElementById('finalize-btn').disabled = true;
-  clearAllocationUI();
-  loadAttendance(date);
+  document.getElementById('compare-btn').disabled = true;
+  hasOsmAllocation = false; hasGoogleAllocation = false;
+  clearAllocationUI(); loadAttendance(date);
 }
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
@@ -525,37 +505,22 @@ function loadAttendance(date) {
   var list = document.getElementById('attendance-list');
   list.innerHTML = '<div class="loading-text">Loading attendance...</div>';
   fetch('/api/attendance/' + encodeURIComponent(date))
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(data) { renderAttendance(data, date); })
-    .catch(function(e) {
-      list.innerHTML = '<div class="loading-text" style="color:#c62828">Failed: ' + esc(e.message) + '</div>';
-    });
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(data) { renderAttendance(data); })
+    .catch(function(e) { list.innerHTML = '<div class="loading-text" style="color:#c62828">Failed: ' + esc(e.message) + '</div>'; });
 }
 
-function renderAttendance(attendees, date) {
+function renderAttendance(attendees) {
   var list = document.getElementById('attendance-list');
   presentSrNames = attendees.filter(function(a) { return a.present; }).map(function(a) { return a.srName; });
   updatePresentBadge(attendees);
-
-  if (!attendees.length) {
-    list.innerHTML = '<div class="empty-text">No SRs registered</div>';
-    return;
-  }
-
-  var html = '';
+  if (!attendees.length) { list.innerHTML = '<div class="empty-text">No SRs registered</div>'; return; }
+  var h = '';
   attendees.forEach(function(a) {
-    var checked = a.present ? 'checked' : '';
-    var disabled = allocationFinalized ? 'disabled' : '';
-    html += '<div class="sr-attendance-item">';
-    html += '<span>' + esc(a.srName) + '</span>';
-    html += '<label class="toggle-switch">';
-    html += '<input type="checkbox" ' + checked + ' ' + disabled + ' data-sr="' + esc(a.srName) + '" onchange="toggleAttendance(this)">';
-    html += '<span class="toggle-slider"></span></label></div>';
+    h += '<div class="sr-attendance-item"><span>' + esc(a.srName) + '</span>';
+    h += '<label class="toggle-switch"><input type="checkbox" ' + (a.present ? 'checked' : '') + ' ' + (allocationFinalized ? 'disabled' : '') + ' data-sr="' + esc(a.srName) + '" onchange="toggleAttendance(this)"><span class="toggle-slider"></span></label></div>';
   });
-  list.innerHTML = html;
+  list.innerHTML = h;
 }
 
 function updatePresentBadge(attendees) {
@@ -563,125 +528,108 @@ function updatePresentBadge(attendees) {
   document.getElementById('present-count-badge').textContent = n + ' / ' + attendees.length + ' present';
 }
 
-function toggleAttendance(checkbox) {
-  var srName = checkbox.getAttribute('data-sr');
-  var present = checkbox.checked;
+function toggleAttendance(cb) {
+  var srName = cb.getAttribute('data-sr'), present = cb.checked;
   var date = document.getElementById('date-select').value;
   fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=' + present, { method: 'PUT' })
     .then(function() {
-      if (present) {
-        if (presentSrNames.indexOf(srName) === -1) presentSrNames.push(srName);
-      } else {
-        presentSrNames = presentSrNames.filter(function(n) { return n !== srName; });
-      }
-      var checked = document.querySelectorAll('#attendance-list input:checked').length;
-      var total = document.querySelectorAll('#attendance-list input').length;
-      document.getElementById('present-count-badge').textContent = checked + ' / ' + total + ' present';
+      if (present) { if (presentSrNames.indexOf(srName) === -1) presentSrNames.push(srName); }
+      else { presentSrNames = presentSrNames.filter(function(n) { return n !== srName; }); }
+      var c = document.querySelectorAll('#attendance-list input:checked').length;
+      var t = document.querySelectorAll('#attendance-list input').length;
+      document.getElementById('present-count-badge').textContent = c + ' / ' + t + ' present';
     })
     .catch(function(e) { showAllocError('Attendance update failed: ' + e.message); });
 }
 
 function markAllPresent() {
-  var date = document.getElementById('date-select').value;
-  if (!date) { showAllocError('Please select a date first.'); return; }
-  var checkboxes = document.querySelectorAll('#attendance-list input[type="checkbox"]');
-  var promises = [];
-  checkboxes.forEach(function(cb) {
-    if (!cb.checked) {
-      cb.checked = true;
-      var srName = cb.getAttribute('data-sr');
-      promises.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=true', { method: 'PUT' }));
-    }
-  });
-  Promise.all(promises).then(function() {
-    loadAttendance(date);
-  });
+  var date = document.getElementById('date-select').value; if (!date) { showAllocError('Select a date first.'); return; }
+  var cbs = document.querySelectorAll('#attendance-list input[type="checkbox"]'), ps = [];
+  cbs.forEach(function(cb) { if (!cb.checked) { cb.checked = true; ps.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(cb.getAttribute('data-sr')) + '?present=true', { method: 'PUT' })); } });
+  Promise.all(ps).then(function() { loadAttendance(date); });
 }
 
 function markNonePresent() {
-  var date = document.getElementById('date-select').value;
-  if (!date) { showAllocError('Please select a date first.'); return; }
-  var checkboxes = document.querySelectorAll('#attendance-list input[type="checkbox"]');
-  var promises = [];
-  checkboxes.forEach(function(cb) {
-    if (cb.checked) {
-      cb.checked = false;
-      var srName = cb.getAttribute('data-sr');
-      promises.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=false', { method: 'PUT' }));
-    }
-  });
-  Promise.all(promises).then(function() {
-    loadAttendance(date);
-  });
+  var date = document.getElementById('date-select').value; if (!date) { showAllocError('Select a date first.'); return; }
+  var cbs = document.querySelectorAll('#attendance-list input[type="checkbox"]'), ps = [];
+  cbs.forEach(function(cb) { if (cb.checked) { cb.checked = false; ps.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(cb.getAttribute('data-sr')) + '?present=false', { method: 'PUT' })); } });
+  Promise.all(ps).then(function() { loadAttendance(date); });
 }
 
 function addNewSr() {
-  var input = document.getElementById('new-sr-input');
-  var name = input.value.trim();
-  if (!name) { showAllocError('Please enter an SR name.'); return; }
-  var date = document.getElementById('date-select').value;
-  if (!date) { showAllocError('Please select a date first.'); return; }
+  var input = document.getElementById('new-sr-input'), name = input.value.trim();
+  if (!name) { showAllocError('Enter an SR name.'); return; }
+  var date = document.getElementById('date-select').value; if (!date) { showAllocError('Select a date first.'); return; }
   fetch('/api/attendance/sr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ srName: name }) })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
     .then(function(r) {
-      if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
-      input.value = '';
-      loadAttendance(date);
+      if (!r.ok) { showAllocError(r.data.error || 'Failed to add SR'); return; }
+      input.value = ''; loadAttendance(date);
     })
     .catch(function(e) { showAllocError('Add SR failed: ' + e.message); });
 }
 
 // ── ALLOCATION ────────────────────────────────────────────────────────────────
-function runAllocation() {
+function runAllocation(mode) {
   var date = document.getElementById('date-select').value;
   if (!date) { showAllocError('Please select a date first.'); return; }
+  if (mode === 'google' && !googleMapsConfigured) { showAllocError('Google Maps API key not configured. Add google.maps.api.key to application.properties.'); return; }
 
-  var btn = document.getElementById('run-btn');
+  var btnId = mode === 'google' ? 'run-google-btn' : 'run-osm-btn';
+  var btn = document.getElementById(btnId);
+  var label = mode === 'google' ? 'Google Maps' : 'OSM';
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Running...';
+  btn.innerHTML = '<span class="spinner"></span> Running (' + label + ')...';
   hideAllocError();
-  clearAllocationUI();
+
+  // Clear only the polylines for this mode, keep markers
+  clearPolylinesByMode(mode);
 
   fetch('/api/allocate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date: date })
   })
-  .then(function(r) {
-    return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; });
-  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
   .then(function(res) {
     btn.disabled = false;
-    btn.textContent = 'Run Allocation';
+    btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     if (!res.ok) {
-      var msg = (res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')';
-      showAllocError(msg);
+      showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
       return;
     }
+    lastAllocationMode = mode;
+    if (mode === 'osm') hasOsmAllocation = true;
+    else hasGoogleAllocation = true;
+
     allocationFinalized = false;
     document.getElementById('undo-btn').disabled = false;
     document.getElementById('finalize-btn').disabled = false;
     document.getElementById('finalized-banner').style.display = 'none';
+    if (hasOsmAllocation && hasGoogleAllocation) document.getElementById('compare-btn').disabled = false;
+
+    document.getElementById('summary-mode-badge').textContent = label;
     renderSummary(res.data);
     renderSrList(res.data.srSummaries);
-    renderAllSrsOnMap(res.data.srSummaries, date);
+    renderAllSrsOnMap(res.data.srSummaries, date, mode);
+    showAllocInfo('Allocation complete using ' + label + '. ' + (mode === 'osm' && googleMapsConfigured ? 'You can also run Google Maps allocation to compare.' : ''));
   })
   .catch(function(e) {
     btn.disabled = false;
-    btn.textContent = 'Run Allocation';
+    btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     showAllocError('Network error: ' + e.message);
   });
 }
 
 function renderSummary(s) {
   document.getElementById('summary-panel').classList.remove('hidden');
-  var unallocStyle = (s.unallocatedShipments > 0) ? 'border-color:#ef9a9a' : '';
-  var unallocValStyle = (s.unallocatedShipments > 0) ? 'color:#c62828' : '';
+  var us = s.unallocatedShipments || 0;
   document.getElementById('summary-stats').innerHTML =
-    sb(s.totalShipments, 'Total Shipments') +
+    sb(s.totalShipments, 'Total') +
     sb(s.allocatedShipments != null ? s.allocatedShipments : s.totalShipments, 'Allocated') +
-    '<div class="stat-box" style="' + unallocStyle + '"><div class="val" style="' + unallocValStyle + '">' + (s.unallocatedShipments || 0) + '</div><div class="lbl">Unallocated</div></div>' +
+    '<div class="stat-box" style="' + (us > 0 ? 'border-color:#ef9a9a' : '') + '"><div class="val" style="' + (us > 0 ? 'color:#c62828' : '') + '">' + us + '</div><div class="lbl">Unallocated</div></div>' +
     sb(s.totalSrs, 'SRs Active') +
-    sb(s.srCapacity || '-', 'Capacity/SR') +
+    sb(s.srCapacity || '-', 'Cap/SR') +
     sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR') +
     sb(s.fairnessVariance !== undefined ? s.fairnessVariance.toFixed(3) : '-', 'Fairness Var');
 }
@@ -692,100 +640,110 @@ function renderSrList(srSummaries) {
   var list = document.getElementById('sr-list');
   var legendItems = document.getElementById('legend-items');
   legendItems.innerHTML = '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
-
-  var html = '';
+  if (hasOsmAllocation || lastAllocationMode === 'osm') {
+    legendItems.innerHTML += '<div class="legend-item"><div class="legend-line" style="background:#555;height:3px;width:22px"></div><span style="color:#555">OSM route (solid)</span></div>';
+  }
+  if (hasGoogleAllocation || lastAllocationMode === 'google') {
+    legendItems.innerHTML += '<div class="legend-item"><div style="width:22px;height:3px;background:repeating-linear-gradient(90deg,#1b8a3c 0,#1b8a3c 4px,transparent 4px,transparent 8px)"></div><span style="color:#1b8a3c">Google Maps route (dashed)</span></div>';
+  }
+  var h = '';
   srSummaries.forEach(function(sr, i) {
     var color = SR_COLORS[i % SR_COLORS.length];
     legendItems.innerHTML += '<div class="legend-item"><div class="legend-dot" style="background:' + color + '"></div>' + esc(sr.srName) + ' (' + sr.shipmentCount + ')</div>';
-    var pincodes = sr.pincodesCovered ? sr.pincodesCovered.slice(0, 4).join(', ') + (sr.pincodesCovered.length > 4 ? '...' : '') : '';
+    var pins = sr.pincodesCovered ? sr.pincodesCovered.slice(0,4).join(', ') + (sr.pincodesCovered.length > 4 ? '...' : '') : '';
     var dist = sr.estimatedDistanceKm ? sr.estimatedDistanceKm.toFixed(1) + ' km' : '';
-    html += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
-    html += '<div class="sr-dot" style="background:' + color + '"></div>';
-    html += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
-    html += '<div class="sr-item-sub">' + esc(pincodes) + (dist ? ' - ' + dist : '') + '</div></div>';
-    html += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
+    h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
+    h += '<div class="sr-dot" style="background:' + color + '"></div>';
+    h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
+    h += '<div class="sr-item-sub">' + esc(pins) + (dist ? ' - ' + dist : '') + '</div></div>';
+    h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
   });
-  list.innerHTML = html;
+  list.innerHTML = h;
 }
 
 // ── MAP RENDERING ─────────────────────────────────────────────────────────────
-function renderAllSrsOnMap(srSummaries, date) {
-  clearMapLayers();
+function renderAllSrsOnMap(srSummaries, date, mode) {
+  // Clear markers only on first allocation; on second just add polylines
+  if (!hasOsmAllocation || !hasGoogleAllocation) clearMarkers();
+
   var i = 0;
-  function renderNext() {
+  function next() {
     if (i >= srSummaries.length) return;
-    var sr = srSummaries[i];
-    var color = SR_COLORS[i % SR_COLORS.length];
-    var idx = i;
-    i++;
+    var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
     fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName))
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(route) {
-        if (!route) { renderNext(); return; }
-        fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName) + '/polyline')
+        if (!route) { next(); return; }
+        // Add markers if not already present
+        if (!srLayers[sr.srName] || !srLayers[sr.srName].markers.length) {
+          addMarkersForSr(sr.srName, route, color, idx, date);
+        }
+        // Fetch polyline for this mode
+        var polylineUrl = '/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName) + '/polyline/' + mode;
+        fetch(polylineUrl)
           .then(function(r) { return r.ok ? r.json() : null; })
-          .then(function(poly) {
-            addSrToMap(sr.srName, route, color, idx, poly, date);
-            renderNext();
-          })
-          .catch(function() {
-            addSrToMap(sr.srName, route, color, idx, null, date);
-            renderNext();
-          });
+          .then(function(poly) { addPolylineForSr(sr.srName, poly, color, mode); next(); })
+          .catch(function() { addPolylineForSr(sr.srName, null, color, mode); next(); });
       })
-      .catch(function() { renderNext(); });
+      .catch(function() { next(); });
   }
-  renderNext();
+  next();
 }
 
-function addSrToMap(srName, route, color, index, polylineCoords, date) {
+function addMarkersForSr(srName, route, color, index, date) {
   if (!route || !route.stops || !route.stops.length) return;
-  var markers = [];
+  if (!srLayers[srName]) srLayers[srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: index };
   var stops = route.stops.slice().sort(function(a, b) { return a.sequence - b.sequence; });
-
   stops.forEach(function(stop) {
-    var isOverride = stop.isOverride === true;
-    var isOor = stop.outOfRange === true;
-    var border = isOverride ? 'border:2px dashed #fff' : 'border:2px solid #fff';
-    var outline = isOor ? 'outline:2px solid #e53935;outline-offset:2px;' : '';
+    var isOvr = stop.isOverride === true, isOor = stop.outOfRange === true;
     var icon = L.divIcon({
       className: '',
-      html: '<div style="width:14px;height:14px;background:' + color + ';' + border + ';' + outline + 'border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div>',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
+      html: '<div style="width:13px;height:13px;background:' + color + ';' + (isOvr ? 'border:2px dashed #fff' : 'border:2px solid #fff') + ';' + (isOor ? 'outline:2px solid #e53935;outline-offset:1px;' : '') + 'border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.35)"></div>',
+      iconSize: [13,13], iconAnchor: [6,6]
     });
     var marker = L.marker([stop.latitude, stop.longitude], { icon: icon, title: srName + ' #' + stop.sequence });
-    marker.bindPopup(buildPopup(srName, stop, color, date), { maxWidth: 240 });
+    marker.bindPopup(buildPopup(srName, stop, color, date), { maxWidth: 230 });
     marker.addTo(map);
-    markers.push(marker);
+    srLayers[srName].markers.push(marker);
   });
+}
+
+function addPolylineForSr(srName, polyCoords, color, mode) {
+  if (!srLayers[srName]) srLayers[srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: 0 };
+  // Remove old polyline for this mode
+  if (mode === 'osm' && srLayers[srName].osmPolyline) { map.removeLayer(srLayers[srName].osmPolyline); srLayers[srName].osmPolyline = null; }
+  if (mode === 'google' && srLayers[srName].googlePolyline) { map.removeLayer(srLayers[srName].googlePolyline); srLayers[srName].googlePolyline = null; }
 
   var polyline;
-  if (polylineCoords && polylineCoords.length > 1) {
-    polyline = L.polyline(
-      polylineCoords.map(function(p) { return [p[0], p[1]]; }),
-      { color: color, weight: 3, opacity: 0.8 }
-    ).addTo(map);
+  if (polyCoords && polyCoords.length > 1) {
+    var opts = mode === 'google'
+      ? { color: '#1b8a3c', weight: 4, opacity: 0.85, dashArray: '8,5' }
+      : { color: color, weight: 3, opacity: 0.8 };
+    polyline = L.polyline(polyCoords.map(function(p) { return [p[0], p[1]]; }), opts).addTo(map);
   } else {
-    var path = [[HUB_LAT, HUB_LNG]];
-    stops.forEach(function(s) { path.push([s.latitude, s.longitude]); });
-    path.push([HUB_LAT, HUB_LNG]);
-    polyline = L.polyline(path, { color: color, weight: 3, opacity: 0.75, dashArray: '6,4' }).addTo(map);
+    // Straight-line fallback
+    var stops = srLayers[srName].markers.map(function(m) { return m.getLatLng(); });
+    if (stops.length) {
+      var path = [[HUB_LAT, HUB_LNG]].concat(stops.map(function(ll) { return [ll.lat, ll.lng]; })).concat([[HUB_LAT, HUB_LNG]]);
+      var opts2 = mode === 'google'
+        ? { color: '#1b8a3c', weight: 3, opacity: 0.6, dashArray: '8,5' }
+        : { color: color, weight: 3, opacity: 0.6, dashArray: '4,3' };
+      polyline = L.polyline(path, opts2).addTo(map);
+    }
   }
-
-  srLayers[srName] = { markers: markers, polyline: polyline, color: color, index: index };
+  if (polyline) {
+    if (mode === 'osm') srLayers[srName].osmPolyline = polyline;
+    else srLayers[srName].googlePolyline = polyline;
+  }
 }
 
 function buildPopup(srName, stop, color, date) {
   var oor = stop.outOfRange ? '<div class="popup-oor">Out-of-range</div>' : '';
-  var reassign = !allocationFinalized
-    ? '<button class="popup-reassign" onclick="openReassignModal(\'' + esc(stop.shippingId) + '\',\'' + esc(srName) + '\')">Reassign</button>'
-    : '';
-  return '<div>' +
-    '<div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + '</div>' + oor +
+  var reassign = !allocationFinalized ? '<button class="popup-reassign" onclick="openReassignModal(\'' + esc(stop.shippingId) + '\',\'' + esc(srName) + '\')">Reassign</button>' : '';
+  return '<div><div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + '</div>' + oor +
     '<div class="popup-row"><span class="popup-label">ID</span><span class="popup-val">' + esc(stop.shippingId) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Pincode</span><span class="popup-val">' + esc(stop.dropPincode) + '</span></div>' +
-    '<div class="popup-row"><span class="popup-label">Lat, Lng</span><span class="popup-val">' + stop.latitude.toFixed(6) + ', ' + stop.longitude.toFixed(6) + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Lat,Lng</span><span class="popup-val">' + (stop.latitude||0).toFixed(5) + ',' + (stop.longitude||0).toFixed(5) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Type</span><span class="popup-val">' + esc(stop.orderType) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Weight</span><span class="popup-val">' + stop.phyWeight + ' kg' + (stop.isHeavy ? ' (Heavy)' : '') + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Flow</span><span class="popup-val">' + esc(stop.shipmentFlow) + '</span></div>' +
@@ -793,45 +751,45 @@ function buildPopup(srName, stop, color, date) {
     reassign + '</div>';
 }
 
+// ── COMPARE ───────────────────────────────────────────────────────────────────
+function compareRoutes() {
+  var date = document.getElementById('date-select').value;
+  if (!hasOsmAllocation || !hasGoogleAllocation) { showAllocError('Run both OSM and Google Maps allocation first.'); return; }
+  document.getElementById('compare-banner').style.display = 'block';
+  // Both polylines are already on the map — just make sure both are visible
+  Object.keys(srLayers).forEach(function(srName) {
+    var layer = srLayers[srName];
+    if (layer.osmPolyline) layer.osmPolyline.addTo(map);
+    if (layer.googlePolyline) layer.googlePolyline.addTo(map);
+  });
+  showAllocInfo('Comparison mode: solid lines = OSM, dashed green lines = Google Maps');
+}
+
 // ── SR SELECTION ──────────────────────────────────────────────────────────────
 function selectSr(srName, index) {
-  currentSrName = srName;
-  currentSrIndex = index;
-  document.querySelectorAll('.sr-item').forEach(function(el) {
-    el.classList.toggle('active', el.getAttribute('data-sr') === srName);
-  });
+  currentSrName = srName; currentSrIndex = index;
+  document.querySelectorAll('.sr-item').forEach(function(el) { el.classList.toggle('active', el.getAttribute('data-sr') === srName); });
   var layer = srLayers[srName];
-  if (layer && layer.markers.length) {
-    var group = L.featureGroup(layer.markers);
-    map.fitBounds(group.getBounds().pad(0.15));
-  }
+  if (layer && layer.markers.length) { map.fitBounds(L.featureGroup(layer.markers).getBounds().pad(0.15)); }
   var date = document.getElementById('date-select').value;
   document.getElementById('route-panel').classList.remove('hidden');
   document.getElementById('route-panel-title').textContent = 'Route: ' + srName;
   document.getElementById('route-stats').innerHTML = '<div class="loading-text">Loading...</div>';
   document.getElementById('stop-list').innerHTML = '';
-
   fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(srName))
     .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(route) { renderRouteDetails(route, SR_COLORS[index % SR_COLORS.length]); })
-    .catch(function(e) {
-      document.getElementById('route-stats').innerHTML = '<div class="loading-text" style="color:#c62828">Error: ' + esc(e.message) + '</div>';
-    });
+    .catch(function(e) { document.getElementById('route-stats').innerHTML = '<div class="loading-text" style="color:#c62828">Error: ' + esc(e.message) + '</div>'; });
 }
 
 function renderRouteDetails(route, color) {
-  var stops = (route.stops || []).slice().sort(function(a, b) { return a.sequence - b.sequence; });
-  var pincodes = {};
-  stops.forEach(function(s) { if (s.dropPincode) pincodes[s.dropPincode] = 1; });
-  var overrides = stops.filter(function(s) { return s.isOverride; }).length;
-
+  var stops = (route.stops || []).slice().sort(function(a,b) { return a.sequence - b.sequence; });
+  var pins = {}, ovr = 0;
+  stops.forEach(function(s) { if (s.dropPincode) pins[s.dropPincode] = 1; if (s.isOverride) ovr++; });
   document.getElementById('route-stats').innerHTML =
-    sb(route.totalShipments, 'Stops') +
-    sb(route.estimatedDistanceKm ? route.estimatedDistanceKm.toFixed(1) : '-', 'km') +
-    sb(Object.keys(pincodes).length, 'Pincodes') +
-    sb(overrides, 'Overrides');
-
-  var html = '';
+    sb(route.totalShipments,'Stops') + sb(route.estimatedDistanceKm ? route.estimatedDistanceKm.toFixed(1) : '-','km') +
+    sb(Object.keys(pins).length,'Pincodes') + sb(ovr,'Overrides');
+  var h = '';
   stops.forEach(function(stop) {
     var tags = '';
     if (stop.isOverride) tags += '<span class="stop-tag override">Override</span>';
@@ -839,22 +797,22 @@ function renderRouteDetails(route, color) {
     if (stop.isHeavy) tags += '<span class="stop-tag heavy">Heavy</span>';
     tags += '<span class="stop-tag">' + esc(stop.shipmentFlow) + '</span>';
     tags += '<span class="stop-tag">' + stop.phyWeight + 'kg</span>';
-    html += '<div class="stop-item" onclick="map.setView([' + stop.latitude + ',' + stop.longitude + '],17)">';
-    html += '<div class="stop-seq" style="background:' + color + '">' + stop.sequence + '</div>';
-    html += '<div class="stop-info"><div class="stop-pincode">' + esc(stop.dropPincode) + '</div>';
-    html += '<div class="stop-id">' + esc(stop.shippingId) + '</div>';
-    html += '<div class="stop-meta">' + tags + '</div></div></div>';
+    h += '<div class="stop-item" onclick="map.setView([' + stop.latitude + ',' + stop.longitude + '],17)">';
+    h += '<div class="stop-seq" style="background:' + color + '">' + stop.sequence + '</div>';
+    h += '<div class="stop-info"><div class="stop-pincode">' + esc(stop.dropPincode) + '</div>';
+    h += '<div class="stop-id">' + esc(stop.shippingId) + '</div>';
+    h += '<div class="stop-meta">' + tags + '</div></div></div>';
   });
-  document.getElementById('stop-list').innerHTML = html;
+  document.getElementById('stop-list').innerHTML = h;
 }
 
+// ── OVERRIDE ──────
 // ── OVERRIDE ──────────────────────────────────────────────────────────────────
 function openReassignModal(shippingId, currentSr) {
   if (allocationFinalized) return;
   pendingReassign = { shippingId: shippingId, currentSr: currentSr };
   document.getElementById('modal-info').innerHTML =
     'Shipment: <strong>' + esc(shippingId) + '</strong><br>Current SR: <strong>' + esc(currentSr) + '</strong>';
-
   var radioList = document.getElementById('sr-radio-list');
   var targets = presentSrNames.filter(function(n) { return n !== currentSr; });
   if (!targets.length) {
@@ -871,19 +829,15 @@ function confirmOverride() {
   var selected = document.querySelector('input[name="targetSr"]:checked');
   if (!selected) { alert('Please select a target SR.'); return; }
   var date = document.getElementById('date-select').value;
-  var shippingId = pendingReassign.shippingId;
   document.getElementById('override-modal').close();
-
   fetch('/api/allocate/' + encodeURIComponent(date) + '/override', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ shippingId: shippingId, targetSrName: selected.value })
+    body: JSON.stringify({ shippingId: pendingReassign.shippingId, targetSrName: selected.value })
   })
-  .then(function(r) {
-    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
-  })
+  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
   .then(function(res) {
-    if (!res.ok) { showAllocError((res.data.message || 'Override failed')); return; }
+    if (!res.ok) { showAllocError(res.data.message || 'Override failed'); return; }
     refreshAllocation();
   })
   .catch(function(e) { showAllocError('Override error: ' + e.message); });
@@ -923,7 +877,8 @@ function refreshAllocation() {
       clearAllocationUI();
       renderSummary(summary);
       renderSrList(summary.srSummaries);
-      renderAllSrsOnMap(summary.srSummaries, date);
+      // Re-render using last known mode
+      if (lastAllocationMode) renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode);
       if (currentSrName) {
         var idx = summary.srSummaries.findIndex(function(s) { return s.srName === currentSrName; });
         if (idx >= 0) selectSr(currentSrName, idx);
@@ -933,20 +888,30 @@ function refreshAllocation() {
 }
 
 // ── UTILITIES ─────────────────────────────────────────────────────────────────
-function clearMapLayers() {
+function clearMarkers() {
   Object.keys(srLayers).forEach(function(srName) {
     var layer = srLayers[srName];
-    layer.markers.forEach(function(m) { map.removeLayer(m); });
-    if (layer.polyline) map.removeLayer(layer.polyline);
+    if (layer.markers) layer.markers.forEach(function(m) { map.removeLayer(m); });
+    if (layer.osmPolyline) map.removeLayer(layer.osmPolyline);
+    if (layer.googlePolyline) map.removeLayer(layer.googlePolyline);
   });
   srLayers = {};
 }
 
+function clearPolylinesByMode(mode) {
+  Object.keys(srLayers).forEach(function(srName) {
+    var layer = srLayers[srName];
+    if (mode === 'osm' && layer.osmPolyline) { map.removeLayer(layer.osmPolyline); layer.osmPolyline = null; }
+    if (mode === 'google' && layer.googlePolyline) { map.removeLayer(layer.googlePolyline); layer.googlePolyline = null; }
+  });
+}
+
 function clearAllocationUI() {
-  clearMapLayers();
+  clearMarkers();
   document.getElementById('summary-panel').classList.add('hidden');
   document.getElementById('sr-list-panel').classList.add('hidden');
   document.getElementById('route-panel').classList.add('hidden');
+  document.getElementById('compare-banner').style.display = 'none';
   document.getElementById('legend-items').innerHTML =
     '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
 }
@@ -956,7 +921,9 @@ window.addEventListener('load', function() {
   initMap();
   initUpload();
 
-  document.getElementById('run-btn').addEventListener('click', runAllocation);
+  document.getElementById('run-osm-btn').addEventListener('click', function() { runAllocation('osm'); });
+  document.getElementById('run-google-btn').addEventListener('click', function() { runAllocation('google'); });
+  document.getElementById('compare-btn').addEventListener('click', compareRoutes);
   document.getElementById('undo-btn').addEventListener('click', undoOverride);
   document.getElementById('finalize-btn').addEventListener('click', finalizeAllocation);
   document.getElementById('date-select').addEventListener('change', onDateChange);
@@ -970,7 +937,6 @@ window.addEventListener('load', function() {
     .then(function(dates) { if (dates.length) populateDateSelector(dates); })
     .catch(function() {});
 });
-/*]]>*/
 </script>
 </body>
 </html>
