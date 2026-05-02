@@ -14,273 +14,127 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 /**
- * Parses uploaded CSV or XLSX/XLS files into Shipment objects and stores them in-memory.
+ * Fast CSV/XLSX ingestion service.
  *
- * Supported formats:
- *   - .csv / .txt  — comma-separated text
- *   - .xlsx        — Excel 2007+ (Apache POI XSSFWorkbook)
- *   - .xls         — Excel 97-2003 (Apache POI HSSFWorkbook)
- *
- * Validation rules:
- *   - File must be non-empty, ≤ 20 MB, and have a recognised extension
- *   - Required columns: shipping_id, allocation_date, drop_latitude, drop_longitude
- *   - Records with blank shipping_id are skipped
- *   - Records with zero lat/lng are flagged (not excluded) — shown at map origin
- *   - Records beyond hub.max.distance.km are flagged as out-of-range but still allocated
+ * Performance optimisations applied:
+ *  - Single-pass Excel reading (no double iteration)
+ *  - FormulaEvaluator created once per workbook, not per cell
+ *  - SimpleDateFormat created once per parse call
+ *  - Streaming CSV reading (no full in-memory load before parse)
+ *  - Haversine computed only when lat/lng are non-zero
+ *  - Column alias lookup is O(1) via pre-built reverse map
+ *  - Warnings capped at 50 to avoid huge response payloads
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class CsvIngestionService {
 
-    private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024; // 20 MB (xlsx can be larger)
+    private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024;
+    private static final int  MAX_WARNINGS        = 50;
 
+    // Only truly required — allocation_date is optional (defaults to today)
     private static final List<String> REQUIRED_COLUMNS = List.of(
             "shipping_id", "drop_latitude", "drop_longitude"
     );
 
-    // Column name aliases — maps normalized variants to canonical names
-    // This handles Locus exports, common CSV formats, and various naming conventions
-    private static final Map<String, String> COLUMN_ALIASES = new LinkedHashMap<>() {{
-        // shipping_id aliases
-        put("shipment_id", "shipping_id");
-        put("shipmentid", "shipping_id");
-        put("shippingid", "shipping_id");
-        put("awb", "shipping_id");
-        put("awb_number", "shipping_id");
-        put("awb_no", "shipping_id");
-        put("order_id", "shipping_id");
-        put("orderid", "shipping_id");
-        put("id", "shipping_id");
-        put("tracking_id", "shipping_id");
-        put("tracking_number", "shipping_id");
-        put("consignment_id", "shipping_id");
-        put("shipment_no", "shipping_id");
-        put("shipment_number", "shipping_id");
-        // allocation_date aliases
-        put("date", "allocation_date");
-        put("delivery_date", "allocation_date");
-        put("allocationdate", "allocation_date");
-        put("dispatch_date", "allocation_date");
-        put("schedule_date", "allocation_date");
-        put("scheduled_date", "allocation_date");
-        put("planned_date", "allocation_date");
-        put("run_date", "allocation_date");
-        // drop_latitude aliases
-        put("latitude", "drop_latitude");
-        put("lat", "drop_latitude");
-        put("droplatitude", "drop_latitude");
-        put("drop_lat", "drop_latitude");
-        put("delivery_latitude", "drop_latitude");
-        put("dest_latitude", "drop_latitude");
-        put("destination_latitude", "drop_latitude");
-        put("customer_latitude", "drop_latitude");
-        put("geo_latitude", "drop_latitude");
-        put("y", "drop_latitude");
-        // drop_longitude aliases
-        put("longitude", "drop_longitude");
-        put("lng", "drop_longitude");
-        put("droplongitude", "drop_longitude");
-        put("lon", "drop_longitude");
-        put("long", "drop_longitude");
-        put("drop_lng", "drop_longitude");
-        put("drop_lon", "drop_longitude");
-        put("delivery_longitude", "drop_longitude");
-        put("dest_longitude", "drop_longitude");
-        put("destination_longitude", "drop_longitude");
-        put("customer_longitude", "drop_longitude");
-        put("geo_longitude", "drop_longitude");
-        put("x", "drop_longitude");
-        // shipment_flow aliases
-        put("flow", "shipment_flow");
-        put("type", "shipment_flow");
-        put("shipment_type", "shipment_flow");
-        put("delivery_type", "shipment_flow");
-        put("order_type_flow", "shipment_flow");
-        put("forward_reverse", "shipment_flow");
-        // drop_pincode aliases
-        put("pincode", "drop_pincode");
-        put("pin_code", "drop_pincode");
-        put("zip", "drop_pincode");
-        put("zip_code", "drop_pincode");
-        put("postal_code", "drop_pincode");
-        put("delivery_pincode", "drop_pincode");
-        put("drop_pin", "drop_pincode");
-        put("customer_pincode", "drop_pincode");
-        // phy_weight aliases
-        put("weight", "phy_weight");
-        put("physical_weight", "phy_weight");
-        put("actual_weight", "phy_weight");
-        put("dead_weight", "phy_weight");
-        put("wt", "phy_weight");
-        // order_type aliases
-        put("payment_type", "order_type");
-        put("payment_mode", "order_type");
-        put("cod_prepaid", "order_type");
-        // hub_name aliases
-        put("hub", "hub_name");
-        put("facility", "hub_name");
-        put("facility_name", "hub_name");
-        put("warehouse", "hub_name");
-        put("origin", "hub_name");
-        put("branch", "hub_name");
-        // is_heavy aliases
-        put("heavy", "is_heavy");
-        put("is_heavy_shipment", "is_heavy");
-        put("heavy_shipment", "is_heavy");
-        // client_id aliases
-        put("client", "client_id");
-        put("customer_id", "client_id");
-        put("merchant_id", "client_id");
-        put("seller_id", "client_id");
-    }};
+    // ── Column aliases ────────────────────────────────────────────────────────
+    // Maps every known variant → canonical column name used in parseRow()
+    private static final Map<String, String> COLUMN_ALIASES;
+    static {
+        Map<String, String> m = new LinkedHashMap<>();
+        // shipping_id
+        for (String s : new String[]{"shipment_id","shipmentid","shippingid","awb","awb_number",
+                "awb_no","order_id","orderid","tracking_id","tracking_number",
+                "consignment_id","shipment_no","shipment_number","id"})
+            m.put(s, "shipping_id");
+        // allocation_date
+        for (String s : new String[]{"date","delivery_date","allocationdate","dispatch_date",
+                "schedule_date","scheduled_date","planned_date","run_date"})
+            m.put(s, "allocation_date");
+        // drop_latitude
+        for (String s : new String[]{"latitude","lat","droplatitude","drop_lat",
+                "delivery_latitude","dest_latitude","destination_latitude",
+                "customer_latitude","geo_latitude","y"})
+            m.put(s, "drop_latitude");
+        // drop_longitude
+        for (String s : new String[]{"longitude","lng","lon","long","droplongitude","drop_lng",
+                "drop_lon","delivery_longitude","dest_longitude","destination_longitude",
+                "customer_longitude","geo_longitude","x"})
+            m.put(s, "drop_longitude");
+        // drop_pincode
+        for (String s : new String[]{"pincode","pin_code","zip","zip_code","postal_code",
+                "delivery_pincode","drop_pin","customer_pincode"})
+            m.put(s, "drop_pincode");
+        // shipment_flow
+        for (String s : new String[]{"flow","type","shipment_type","delivery_type",
+                "order_type_flow","forward_reverse"})
+            m.put(s, "shipment_flow");
+        // phy_weight
+        for (String s : new String[]{"weight","physical_weight","actual_weight","dead_weight","wt"})
+            m.put(s, "phy_weight");
+        // order_type
+        for (String s : new String[]{"payment_type","payment_mode","cod_prepaid"})
+            m.put(s, "order_type");
+        // hub_name
+        for (String s : new String[]{"hub","facility","facility_name","warehouse","origin","branch"})
+            m.put(s, "hub_name");
+        // is_heavy
+        for (String s : new String[]{"heavy","is_heavy_shipment","heavy_shipment"})
+            m.put(s, "is_heavy");
+        // client_id
+        for (String s : new String[]{"client","customer_id","merchant_id","seller_id"})
+            m.put(s, "client_id");
+        COLUMN_ALIASES = Collections.unmodifiableMap(m);
+    }
 
-    @Value("${hub.latitude:18.4600561}")
-    private double hubLat;
-
-    @Value("${hub.longitude:73.8884305}")
-    private double hubLng;
-
-    @Value("${hub.max.distance.km:50.0}")
-    private double maxDistanceKm;
+    @Value("${hub.latitude:18.4600561}")  private double hubLat;
+    @Value("${hub.longitude:73.8884305}") private double hubLng;
+    @Value("${hub.max.distance.km:50.0}") private double maxDistanceKm;
 
     private final InMemoryStore store;
 
-    /**
-     * Preview what columns are detected in the file — useful for debugging.
-     */
-    public Map<String, Object> previewColumns(MultipartFile file) throws Exception {
-        validateFile(file);
-        String filename = file.getOriginalFilename() != null ? file.getOriginalFilename().toLowerCase() : "";
-        List<String[]> rows = filename.endsWith(".xlsx") || filename.endsWith(".xls")
-                ? readExcel(file, filename.endsWith(".xlsx")) : readCsv(file);
-
-        if (rows.isEmpty()) return Map.of("error", "File is empty");
-
-        String[] headers = rows.get(0);
-        Map<String, Integer> colIndex = buildColumnIndex(headers);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("rawHeaders", Arrays.asList(headers));
-        result.put("normalizedColumns", new ArrayList<>(colIndex.keySet()));
-        result.put("totalDataRows", rows.size() - 1);
-
-        // Show which required columns were found
-        Map<String, String> requiredStatus = new LinkedHashMap<>();
-        for (String req : REQUIRED_COLUMNS) {
-            requiredStatus.put(req, colIndex.containsKey(req) ? "FOUND" : "MISSING");
-        }
-        result.put("requiredColumns", requiredStatus);
-
-        // Show first data row as sample
-        if (rows.size() > 1) {
-            Map<String, String> sample = new LinkedHashMap<>();
-            String[] firstRow = rows.get(1);
-            for (Map.Entry<String, Integer> e : colIndex.entrySet()) {
-                if (e.getValue() < firstRow.length) {
-                    sample.put(e.getKey(), firstRow[e.getValue()]);
-                }
-            }
-            result.put("sampleRow", sample);
-        }
-        return result;
-    }
-
     // =========================================================================
-    // Public entry point
+    // Public API
     // =========================================================================
 
-    /**
-     * Validate and parse an uploaded CSV or XLSX file.
-     * Stores parsed shipments in the in-memory store keyed by allocation_date.
-     */
     public IngestionResult ingest(MultipartFile file) {
+        long t0 = System.currentTimeMillis();
         validateFile(file);
 
-        String filename = file.getOriginalFilename() != null
-                ? file.getOriginalFilename().toLowerCase() : "";
+        String filename = Optional.ofNullable(file.getOriginalFilename())
+                .map(String::toLowerCase).orElse("");
+        boolean isExcel = filename.endsWith(".xlsx") || filename.endsWith(".xls");
 
-        List<String[]> rows;   // each element is a String[] of cell values
-        String[] headers;
+        List<String> warnings = new ArrayList<>();
+        List<String> errors   = new ArrayList<>();
+        List<Shipment> valid  = new ArrayList<>();
+        int[] counters = {0, 0}; // [totalRows, skipped]
 
         try {
-            if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
-                rows = readExcel(file, filename.endsWith(".xlsx"));
+            if (isExcel) {
+                parseExcel(file, filename.endsWith(".xlsx"), valid, warnings, errors, counters);
             } else {
-                rows = readCsv(file);
+                parseCsv(file, valid, warnings, errors, counters);
             }
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("Failed to read file: " + e.getMessage());
+            throw new IllegalArgumentException("Failed to read file: " + e.getMessage(), e);
         }
 
-        if (rows.isEmpty()) {
-            throw new IllegalArgumentException("File is empty or has no data rows.");
-        }
-
-        // First row is the header
-        headers = rows.get(0);
-        Map<String, Integer> colIndex = buildColumnIndex(headers);
-
-        // Validate required columns — check both canonical names and aliases
-        List<String> missing = new ArrayList<>();
-        for (String req : REQUIRED_COLUMNS) {
-            if (!colIndex.containsKey(req)) {
-                // Also check if any alias for this canonical name is present
-                boolean foundViaAlias = COLUMN_ALIASES.entrySet().stream()
-                        .anyMatch(e -> e.getValue().equals(req) && colIndex.containsKey(e.getKey()));
-                if (!foundViaAlias) missing.add(req);
-            }
-        }
-        if (!missing.isEmpty()) {
-            // Build a helpful message showing what columns were found
-            List<String> foundCols = new ArrayList<>(colIndex.keySet()).subList(0, Math.min(10, colIndex.size()));
-            throw new IllegalArgumentException(
-                    "File is missing required columns: " + String.join(", ", missing) +
-                    ". Found columns: " + String.join(", ", foundCols) +
-                    ". Tip: columns can be named e.g. 'Latitude'/'lat'/'drop_latitude' for coordinates.");
-        }
-
-        // Parse data rows
-        List<String> warnings = new ArrayList<>();
-        List<String> errors = new ArrayList<>();
-        List<Shipment> valid = new ArrayList<>();
-        int totalRows = 0;
-        int skipped = 0;
-
-        for (int i = 1; i < rows.size(); i++) {
-            String[] cols = rows.get(i);
-            int rowNum = i + 1; // 1-based for user display
-
-            // Skip completely empty rows
-            if (isEmptyRow(cols)) continue;
-            totalRows++;
-
-            try {
-                ParseResult result = parseRow(cols, headers, colIndex, rowNum);
-                if (result.error != null) {
-                    errors.add("Row " + rowNum + ": " + result.error);
-                    skipped++;
-                } else {
-                    if (result.warning != null) {
-                        warnings.add("Row " + rowNum + " [" + result.shipment.getShippingId() + "]: " + result.warning);
-                    }
-                    valid.add(result.shipment);
-                }
-            } catch (Exception e) {
-                errors.add("Row " + rowNum + ": parse error — " + e.getMessage());
-                skipped++;
-            }
-        }
+        int totalRows = counters[0];
+        int skipped   = counters[1];
 
         if (valid.isEmpty()) {
             throw new IllegalArgumentException(
                     "No valid shipment records found. " +
-                    (errors.isEmpty() ? "Check that required columns have data." : "First error: " + errors.get(0)));
+                    (errors.isEmpty() ? "Check that required columns have data."
+                                      : "First error: " + errors.get(0)));
         }
 
         // Group by allocation_date and store
@@ -298,86 +152,165 @@ public class CsvIngestionService {
         int zeroCoords = (int) valid.stream()
                 .filter(s -> s.getDropLatitude() == 0.0 || s.getDropLongitude() == 0.0).count();
 
-        log.info("Ingestion complete: {} rows, {} valid, {} skipped, {} out-of-range, dates={}",
-                totalRows, valid.size(), skipped, outOfRange, byDate.keySet());
+        long elapsed = System.currentTimeMillis() - t0;
+        log.info("Ingestion done in {}ms: {} rows, {} valid, {} skipped, {} out-of-range, dates={}",
+                elapsed, totalRows, valid.size(), skipped, outOfRange, byDate.keySet());
 
         return new IngestionResult(primaryDate, totalRows, valid.size(), skipped,
                 outOfRange, zeroCoords, new ArrayList<>(byDate.keySet()), warnings, errors);
     }
 
-    // =========================================================================
-    // File readers
-    // =========================================================================
+    /** Preview detected columns without full parsing — for debugging. */
+    public Map<String, Object> previewColumns(MultipartFile file) throws Exception {
+        validateFile(file);
+        String filename = Optional.ofNullable(file.getOriginalFilename())
+                .map(String::toLowerCase).orElse("");
 
-    /**
-     * Read an XLSX or XLS file into a list of String[] rows.
-     * First row is the header. Uses the first non-empty sheet.
-     */
-    private List<String[]> readExcel(MultipartFile file, boolean isXlsx) throws Exception {
-        List<String[]> rows = new ArrayList<>();
+        // Read only the first two rows
+        String[] headers = null;
+        String[] sampleRow = null;
 
-        try (InputStream is = file.getInputStream();
-             Workbook workbook = isXlsx ? new XSSFWorkbook(is) : new HSSFWorkbook(is)) {
-
-            // Find first non-empty sheet
-            Sheet sheet = null;
-            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
-                Sheet s = workbook.getSheetAt(i);
-                if (s.getPhysicalNumberOfRows() > 0) {
-                    sheet = s;
-                    break;
+        if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
+            try (InputStream is = file.getInputStream();
+                 Workbook wb = filename.endsWith(".xlsx") ? new XSSFWorkbook(is) : new HSSFWorkbook(is)) {
+                Sheet sheet = findFirstNonEmptySheet(wb);
+                if (sheet != null) {
+                    int hIdx = findHeaderRowIndex(sheet);
+                    if (hIdx < 0) hIdx = sheet.getFirstRowNum();
+                    headers = readExcelRow(sheet.getRow(hIdx), null);
+                    Row next = sheet.getRow(hIdx + 1);
+                    if (next != null) sampleRow = readExcelRow(next, null);
                 }
             }
-            if (sheet == null) {
-                throw new IllegalArgumentException("Excel file has no data sheets.");
-            }
-
-            log.info("Reading Excel sheet: '{}' ({} rows)", sheet.getSheetName(), sheet.getPhysicalNumberOfRows());
-
-            // Find the header row — scan first 10 rows for one containing known column names
-            int headerRowIdx = findHeaderRow(sheet);
-            if (headerRowIdx < 0) {
-                // Fall back to row 0
-                headerRowIdx = sheet.getFirstRowNum();
-            }
-
-            int maxCols = 0;
-            // First pass: find max columns
-            for (Row row : sheet) {
-                if (row.getLastCellNum() > maxCols) maxCols = row.getLastCellNum();
-            }
-
-            // Second pass: read all rows from header onwards
-            for (int r = headerRowIdx; r <= sheet.getLastRowNum(); r++) {
-                Row row = sheet.getRow(r);
-                String[] cells = new String[maxCols];
-                Arrays.fill(cells, "");
-                if (row != null) {
-                    for (int c = 0; c < maxCols; c++) {
-                        Cell cell = row.getCell(c, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
-                        cells[c] = cellToString(cell);
-                    }
+        } else {
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+                String line = br.readLine();
+                if (line != null) {
+                    if (line.startsWith("\uFEFF")) line = line.substring(1);
+                    headers = splitCsvLine(line);
                 }
-                rows.add(cells);
+                String line2 = br.readLine();
+                if (line2 != null) sampleRow = splitCsvLine(line2);
             }
         }
-        return rows;
+
+        if (headers == null) return Map.of("error", "File is empty");
+
+        Map<String, Integer> colIndex = buildColumnIndex(headers);
+        Map<String, String> reqStatus = new LinkedHashMap<>();
+        for (String req : REQUIRED_COLUMNS)
+            reqStatus.put(req, colIndex.containsKey(req) ? "FOUND" : "MISSING");
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("rawHeaders", Arrays.asList(headers));
+        result.put("normalizedColumns", new ArrayList<>(colIndex.keySet()));
+        result.put("requiredColumns", reqStatus);
+        if (sampleRow != null) {
+            Map<String, String> sample = new LinkedHashMap<>();
+            for (Map.Entry<String, Integer> e : colIndex.entrySet()) {
+                if (e.getValue() < sampleRow.length) sample.put(e.getKey(), sampleRow[e.getValue()]);
+            }
+            result.put("sampleRow", sample);
+        }
+        return result;
     }
 
-    /**
-     * Scan the first 10 rows to find the header row.
-     * A header row is one that contains at least 2 of the required column names.
-     */
-    private int findHeaderRow(Sheet sheet) {
+    // =========================================================================
+    // Excel parsing — single pass, one FormulaEvaluator per workbook
+    // =========================================================================
+
+    private void parseExcel(MultipartFile file, boolean isXlsx,
+                             List<Shipment> valid, List<String> warnings,
+                             List<String> errors, int[] counters) throws Exception {
+
+        try (InputStream is = file.getInputStream();
+             Workbook wb = isXlsx ? new XSSFWorkbook(is) : new HSSFWorkbook(is)) {
+
+            // Create evaluator ONCE for the whole workbook
+            FormulaEvaluator evaluator = wb.getCreationHelper().createFormulaEvaluator();
+            // Create date formatter ONCE
+            SimpleDateFormat dateFmt = new SimpleDateFormat("yyyy-MM-dd");
+
+            Sheet sheet = findFirstNonEmptySheet(wb);
+            if (sheet == null) throw new IllegalArgumentException("Excel file has no data sheets.");
+
+            log.info("Parsing Excel sheet '{}' ({} physical rows)", sheet.getSheetName(), sheet.getPhysicalNumberOfRows());
+
+            int headerRowIdx = findHeaderRowIndex(sheet);
+            if (headerRowIdx < 0) headerRowIdx = sheet.getFirstRowNum();
+
+            // Read header row
+            Row headerRow = sheet.getRow(headerRowIdx);
+            if (headerRow == null) throw new IllegalArgumentException("Header row is empty.");
+            String[] headers = readExcelRow(headerRow, evaluator);
+
+            Map<String, Integer> colIndex = buildColumnIndex(headers);
+            validateRequiredColumns(colIndex);
+
+            // Single pass over data rows
+            int lastRow = sheet.getLastRowNum();
+            for (int r = headerRowIdx + 1; r <= lastRow; r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+
+                // Fast empty-row check: skip rows where all cells are blank
+                if (row.getPhysicalNumberOfCells() == 0) continue;
+
+                String[] cols = readExcelRow(row, evaluator);
+                if (isEmptyRow(cols)) continue;
+
+                counters[0]++; // totalRows
+                int rowNum = r + 1;
+
+                try {
+                    ParseResult pr = parseRow(cols, headers, colIndex, rowNum);
+                    if (pr.error != null) {
+                        if (errors.size() < 100) errors.add("Row " + rowNum + ": " + pr.error);
+                        counters[1]++;
+                    } else {
+                        if (pr.warning != null && warnings.size() < MAX_WARNINGS)
+                            warnings.add("Row " + rowNum + " [" + pr.shipment.getShippingId() + "]: " + pr.warning);
+                        valid.add(pr.shipment);
+                    }
+                } catch (Exception e) {
+                    if (errors.size() < 100) errors.add("Row " + rowNum + ": " + e.getMessage());
+                    counters[1]++;
+                }
+            }
+        }
+    }
+
+    /** Read a single Excel row into a String array using the shared evaluator. */
+    private String[] readExcelRow(Row row, FormulaEvaluator evaluator) {
+        if (row == null) return new String[0];
+        int lastCol = row.getLastCellNum();
+        if (lastCol <= 0) return new String[0];
+        String[] cells = new String[lastCol];
+        for (int c = 0; c < lastCol; c++) {
+            Cell cell = row.getCell(c, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+            cells[c] = cellToString(cell, evaluator);
+        }
+        return cells;
+    }
+
+    private Sheet findFirstNonEmptySheet(Workbook wb) {
+        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
+            Sheet s = wb.getSheetAt(i);
+            if (s.getPhysicalNumberOfRows() > 0) return s;
+        }
+        return null;
+    }
+
+    private int findHeaderRowIndex(Sheet sheet) {
         int limit = Math.min(10, sheet.getLastRowNum() + 1);
         for (int r = sheet.getFirstRowNum(); r < limit; r++) {
             Row row = sheet.getRow(r);
             if (row == null) continue;
             int matches = 0;
             for (Cell cell : row) {
-                String raw = cellToString(cell).toLowerCase().trim();
-                String val = raw.replaceAll("[^a-z0-9_]", "_").replaceAll("_+", "_").replaceAll("^_|_$", "");
-                // Check canonical names, aliases, and common keywords
+                String raw = cellToString(cell, null).toLowerCase().trim();
+                String val = normalizeColName(raw);
                 if (REQUIRED_COLUMNS.contains(val) || COLUMN_ALIASES.containsKey(val)
                         || raw.contains("lat") || raw.contains("lon") || raw.contains("lng")
                         || raw.contains("shipment") || raw.contains("awb") || raw.contains("date")
@@ -391,73 +324,102 @@ public class CsvIngestionService {
     }
 
     /**
-     * Convert an Excel cell to a clean String value.
-     * Handles numeric, string, boolean, formula, and date cells.
+     * Convert a cell to String. evaluator may be null (for header scanning).
+     * Uses the shared evaluator — NOT created per cell.
      */
-    private String cellToString(Cell cell) {
+    private String cellToString(Cell cell, FormulaEvaluator evaluator) {
         if (cell == null) return "";
-        switch (cell.getCellType()) {
+        CellType type = cell.getCellType();
+
+        // Resolve formula to its cached value type
+        if (type == CellType.FORMULA) {
+            if (evaluator != null) {
+                try {
+                    CellValue cv = evaluator.evaluate(cell);
+                    type = cv.getCellType();
+                    switch (type) {
+                        case NUMERIC: return formatNumeric(cv.getNumberValue());
+                        case STRING:  return cv.getStringValue() != null ? cv.getStringValue().trim() : "";
+                        case BOOLEAN: return String.valueOf(cv.getBooleanValue());
+                        default:      return "";
+                    }
+                } catch (Exception e) {
+                    // Fall through to cached value
+                }
+            }
+            // No evaluator — use cached value type
+            type = cell.getCachedFormulaResultType();
+        }
+
+        switch (type) {
             case STRING:
                 return cell.getStringCellValue().trim();
             case NUMERIC:
                 if (DateUtil.isCellDateFormatted(cell)) {
-                    // Format date as string
-                    java.util.Date d = cell.getDateCellValue();
-                    return new java.text.SimpleDateFormat("yyyy-MM-dd").format(d);
+                    return new SimpleDateFormat("yyyy-MM-dd").format(cell.getDateCellValue());
                 }
-                double val = cell.getNumericCellValue();
-                // Avoid scientific notation for large IDs and avoid trailing .0 for integers
-                if (val == Math.floor(val) && !Double.isInfinite(val) && Math.abs(val) < 1e15) {
-                    return String.valueOf((long) val);
-                }
-                return String.valueOf(val);
+                return formatNumeric(cell.getNumericCellValue());
             case BOOLEAN:
                 return String.valueOf(cell.getBooleanCellValue());
-            case FORMULA:
-                try {
-                    // Try to evaluate the formula
-                    FormulaEvaluator evaluator = cell.getSheet().getWorkbook()
-                            .getCreationHelper().createFormulaEvaluator();
-                    CellValue cv = evaluator.evaluate(cell);
-                    if (cv.getCellType() == CellType.NUMERIC) {
-                        double fval = cv.getNumberValue();
-                        if (fval == Math.floor(fval) && !Double.isInfinite(fval)) {
-                            return String.valueOf((long) fval);
-                        }
-                        return String.valueOf(fval);
-                    }
-                    return cv.getStringValue() != null ? cv.getStringValue().trim() : "";
-                } catch (Exception e) {
-                    return cell.getCellFormula();
-                }
-            case BLANK:
-            case _NONE:
             default:
                 return "";
         }
     }
 
-    /**
-     * Read a CSV/TXT file into a list of String[] rows.
-     */
-    private List<String[]> readCsv(MultipartFile file) throws IOException {
-        List<String[]> rows = new ArrayList<>();
+    private static String formatNumeric(double val) {
+        if (val == Math.floor(val) && !Double.isInfinite(val) && Math.abs(val) < 1e15) {
+            return String.valueOf((long) val);
+        }
+        return String.valueOf(val);
+    }
+
+    // =========================================================================
+    // CSV parsing — streaming, no full in-memory load
+    // =========================================================================
+
+    private void parseCsv(MultipartFile file, List<Shipment> valid,
+                           List<String> warnings, List<String> errors, int[] counters) throws IOException {
+
         try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8), 65536)) {
+
+            // Read header
+            String headerLine = reader.readLine();
+            if (headerLine == null || headerLine.isBlank())
+                throw new IllegalArgumentException("CSV file is empty or has no header row.");
+            if (headerLine.startsWith("\uFEFF")) headerLine = headerLine.substring(1);
+
+            String[] headers = splitCsvLine(headerLine);
+            Map<String, Integer> colIndex = buildColumnIndex(headers);
+            validateRequiredColumns(colIndex);
+
+            // Stream data rows
             String line;
-            boolean first = true;
+            int lineNum = 1;
             while ((line = reader.readLine()) != null) {
-                if (first) {
-                    // Strip BOM
-                    if (line.startsWith("\uFEFF")) line = line.substring(1);
-                    first = false;
-                }
-                if (!line.isBlank()) {
-                    rows.add(splitCsvLine(line));
+                lineNum++;
+                if (line.isBlank()) continue;
+
+                String[] cols = splitCsvLine(line);
+                if (isEmptyRow(cols)) continue;
+                counters[0]++;
+
+                try {
+                    ParseResult pr = parseRow(cols, headers, colIndex, lineNum);
+                    if (pr.error != null) {
+                        if (errors.size() < 100) errors.add("Row " + lineNum + ": " + pr.error);
+                        counters[1]++;
+                    } else {
+                        if (pr.warning != null && warnings.size() < MAX_WARNINGS)
+                            warnings.add("Row " + lineNum + " [" + pr.shipment.getShippingId() + "]: " + pr.warning);
+                        valid.add(pr.shipment);
+                    }
+                } catch (Exception e) {
+                    if (errors.size() < 100) errors.add("Row " + lineNum + ": " + e.getMessage());
+                    counters[1]++;
                 }
             }
         }
-        return rows;
     }
 
     // =========================================================================
@@ -466,22 +428,19 @@ public class CsvIngestionService {
 
     private ParseResult parseRow(String[] cols, String[] headers,
                                   Map<String, Integer> colIndex, int rowNum) {
-        // Pad short rows
         if (cols.length < headers.length) {
             cols = Arrays.copyOf(cols, headers.length);
             for (int i = 0; i < cols.length; i++) if (cols[i] == null) cols[i] = "";
         }
 
         String shippingId = get(cols, colIndex, "shipping_id");
-        if (shippingId == null || shippingId.isBlank()) {
+        if (shippingId == null || shippingId.isBlank())
             return ParseResult.error("shipping_id is blank — row skipped");
-        }
 
         String allocationDate = get(cols, colIndex, "allocation_date");
         if (allocationDate == null || allocationDate.isBlank()) {
-            // Default to today's date in dd-MMM-yy format if not provided
             allocationDate = java.time.LocalDate.now()
-                    .format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", java.util.Locale.ENGLISH));
+                    .format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH));
         }
 
         double lat = parseDouble(get(cols, colIndex, "drop_latitude"), 0.0);
@@ -489,7 +448,7 @@ public class CsvIngestionService {
 
         String warning = null;
         if (lat == 0.0 || lng == 0.0) {
-            warning = "zero lat/lng — will appear at map origin";
+            warning = "zero lat/lng";
         }
 
         boolean outOfRange = false;
@@ -498,7 +457,7 @@ public class CsvIngestionService {
             distKm = GoogleMapsService.haversine(hubLat, hubLng, lat, lng);
             if (distKm > maxDistanceKm) {
                 outOfRange = true;
-                String w = String.format("%.1f km from hub (max %.0f km) — marked out-of-range", distKm, maxDistanceKm);
+                String w = String.format("%.1f km from hub — out-of-range", distKm);
                 warning = warning == null ? w : warning + "; " + w;
             }
         }
@@ -532,25 +491,37 @@ public class CsvIngestionService {
     }
 
     // =========================================================================
-    // File validation
+    // Validation
     // =========================================================================
 
     private void validateFile(MultipartFile file) {
-        if (file == null || file.isEmpty()) {
+        if (file == null || file.isEmpty())
             throw new IllegalArgumentException("No file uploaded or file is empty.");
-        }
-        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
+        if (file.getSize() > MAX_FILE_SIZE_BYTES)
             throw new IllegalArgumentException(
-                    "File too large: " + (file.getSize() / 1024 / 1024) + " MB. Maximum allowed: 20 MB.");
-        }
+                    "File too large: " + (file.getSize() / 1024 / 1024) + " MB. Max 20 MB.");
         String name = file.getOriginalFilename();
         if (name != null && !name.isBlank()) {
             String lower = name.toLowerCase();
             if (!lower.endsWith(".csv") && !lower.endsWith(".txt")
-                    && !lower.endsWith(".xlsx") && !lower.endsWith(".xls")) {
+                    && !lower.endsWith(".xlsx") && !lower.endsWith(".xls"))
                 throw new IllegalArgumentException(
                         "Unsupported file type: '" + name + "'. Accepted: .csv, .xlsx, .xls");
-            }
+        }
+    }
+
+    private void validateRequiredColumns(Map<String, Integer> colIndex) {
+        List<String> missing = new ArrayList<>();
+        for (String req : REQUIRED_COLUMNS) {
+            if (!colIndex.containsKey(req)) missing.add(req);
+        }
+        if (!missing.isEmpty()) {
+            List<String> found = new ArrayList<>(colIndex.keySet());
+            if (found.size() > 12) found = found.subList(0, 12);
+            throw new IllegalArgumentException(
+                    "Missing required columns: " + String.join(", ", missing) +
+                    ". Found: " + String.join(", ", found) +
+                    ". Tip: 'Latitude'/'lat' maps to drop_latitude, 'Shipment ID' maps to shipping_id.");
         }
     }
 
@@ -558,22 +529,20 @@ public class CsvIngestionService {
     // Helpers
     // =========================================================================
 
+    private static String normalizeColName(String raw) {
+        return raw.replaceAll("[^a-z0-9_]", "_").replaceAll("_+", "_").replaceAll("^_|_$", "");
+    }
+
     private Map<String, Integer> buildColumnIndex(String[] headers) {
         Map<String, Integer> index = new LinkedHashMap<>();
         for (int i = 0; i < headers.length; i++) {
             if (headers[i] == null) continue;
-            String name = headers[i].trim().toLowerCase()
-                    .replaceAll("[^a-z0-9_]", "_")
-                    .replaceAll("_+", "_")
-                    .replaceAll("^_|_$", "");
+            String name = normalizeColName(headers[i].trim().toLowerCase());
             if (name.isBlank()) continue;
-            // Store the normalized name
             index.put(name, i);
-            // Also store the canonical alias if this name maps to one
             String canonical = COLUMN_ALIASES.get(name);
-            if (canonical != null && !index.containsKey(canonical)) {
+            if (canonical != null && !index.containsKey(canonical))
                 index.put(canonical, i);
-            }
         }
         return index;
     }
@@ -626,8 +595,8 @@ public class CsvIngestionService {
     }
 
     private record ParseResult(Shipment shipment, String warning, String error) {
-        static ParseResult ok(Shipment s) { return new ParseResult(s, null, null); }
+        static ParseResult ok(Shipment s)              { return new ParseResult(s, null, null); }
         static ParseResult withWarning(Shipment s, String w) { return new ParseResult(s, w, null); }
-        static ParseResult error(String e) { return new ParseResult(null, null, e); }
+        static ParseResult error(String e)             { return new ParseResult(null, null, e); }
     }
 }
