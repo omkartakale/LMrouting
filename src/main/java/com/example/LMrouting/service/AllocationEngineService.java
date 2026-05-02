@@ -66,12 +66,21 @@ public class AllocationEngineService {
                     ". Please upload a CSV file first.");
         }
 
+        // Filter out shipments beyond max distance from hub (out-of-range)
+        List<Shipment> allocatableShipments = allShipments.stream()
+                .filter(s -> !s.isOutOfRange())
+                .filter(s -> s.getDropLatitude() != 0 && s.getDropLongitude() != 0)
+                .collect(java.util.stream.Collectors.toList());
+
+        log.info("AllocationEngineService: {} total shipments, {} within range (excluded {} out-of-range)",
+                allShipments.size(), allocatableShipments.size(), allShipments.size() - allocatableShipments.size());
+
         List<String> presentSrNames = store.getPresentSrNames(date);
         if (presentSrNames.isEmpty()) {
             throw new NoPresentSrsException("At least one SR must be marked present before running allocation.");
         }
 
-        log.info("AllocationEngineService: {} shipments, {} present SRs", allShipments.size(), presentSrNames.size());
+        log.info("AllocationEngineService: {} allocatable shipments, {} present SRs", allocatableShipments.size(), presentSrNames.size());
 
         // ── SR Capacity enforcement ────────────────────────────────────────────
         // Each SR can handle at most srCapacity shipments per day.
@@ -79,16 +88,16 @@ public class AllocationEngineService {
         // If there are more shipments than capacity, we allocate only the first
         // (presentSRs * srCapacity) shipments and log the rest as unallocated.
         int totalCapacity = presentSrNames.size() * srCapacity;
-        List<Shipment> shipmentsToAllocate = allShipments;
+        List<Shipment> shipmentsToAllocate = allocatableShipments;
         List<Shipment> unallocatedShipments = new ArrayList<>();
 
-        if (allShipments.size() > totalCapacity) {
+        if (allocatableShipments.size() > totalCapacity) {
             log.warn("AllocationEngineService: {} shipments exceed total capacity ({} SRs × {} = {}). " +
                     "{} shipments will not be allocated.",
-                    allShipments.size(), presentSrNames.size(), srCapacity, totalCapacity,
-                    allShipments.size() - totalCapacity);
-            shipmentsToAllocate = new ArrayList<>(allShipments.subList(0, totalCapacity));
-            unallocatedShipments = new ArrayList<>(allShipments.subList(totalCapacity, allShipments.size()));
+                    allocatableShipments.size(), presentSrNames.size(), srCapacity, totalCapacity,
+                    allocatableShipments.size() - totalCapacity);
+            shipmentsToAllocate = new ArrayList<>(allocatableShipments.subList(0, totalCapacity));
+            unallocatedShipments = new ArrayList<>(allocatableShipments.subList(totalCapacity, allocatableShipments.size()));
         }
 
         // Separate Forward and Reverse shipments (from the capacity-limited set)

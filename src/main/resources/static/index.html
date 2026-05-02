@@ -728,6 +728,7 @@ function buildPopup(srName, stop, color, date) {
     '<div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + '</div>' + oor +
     '<div class="popup-row"><span class="popup-label">ID</span><span class="popup-val">' + esc(stop.shippingId) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Pincode</span><span class="popup-val">' + esc(stop.dropPincode) + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Lat, Lng</span><span class="popup-val">' + stop.latitude.toFixed(6) + ', ' + stop.longitude.toFixed(6) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Type</span><span class="popup-val">' + esc(stop.orderType) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Weight</span><span class="popup-val">' + stop.phyWeight + ' kg' + (stop.isHeavy ? ' (Heavy)' : '') + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Flow</span><span class="popup-val">' + esc(stop.shipmentFlow) + '</span></div>' +
