@@ -75,6 +75,51 @@ public class AllocationEngineService {
         log.info("AllocationEngineService: {} total shipments, {} within range (excluded {} out-of-range)",
                 allShipments.size(), allocatableShipments.size(), allShipments.size() - allocatableShipments.size());
 
+        // ── Outlier detection: remove points far from the main cluster ─────────
+        if (allocatableShipments.size() > 10) {
+            double[] lats = allocatableShipments.stream().mapToDouble(Shipment::getDropLatitude).sorted().toArray();
+            double[] lngs = allocatableShipments.stream().mapToDouble(Shipment::getDropLongitude).sorted().toArray();
+            double medianLat = lats[lats.length / 2];
+            double medianLng = lngs[lngs.length / 2];
+
+            double[] dists = allocatableShipments.stream()
+                    .mapToDouble(s -> GoogleMapsService.haversine(medianLat, medianLng, s.getDropLatitude(), s.getDropLongitude()))
+                    .sorted().toArray();
+            double p90 = dists[(int)(dists.length * 0.90)];
+            double threshold = Math.max(p90 * 1.5, 3.0);
+
+            List<Shipment> kept = new ArrayList<>();
+            int outlierCount = 0;
+            for (Shipment s : allocatableShipments) {
+                double d = GoogleMapsService.haversine(medianLat, medianLng, s.getDropLatitude(), s.getDropLongitude());
+                if (d <= threshold) {
+                    kept.add(s);
+                } else {
+                    // Check if it has at least 3 neighbors within 2km
+                    int neighbors = 0;
+                    for (Shipment other : allocatableShipments) {
+                        if (other == s) continue;
+                        if (GoogleMapsService.haversine(s.getDropLatitude(), s.getDropLongitude(),
+                                other.getDropLatitude(), other.getDropLongitude()) <= 2.0) {
+                            neighbors++;
+                            if (neighbors >= 3) break;
+                        }
+                    }
+                    if (neighbors >= 3) {
+                        kept.add(s);
+                    } else {
+                        s.setOutOfRange(true);
+                        outlierCount++;
+                    }
+                }
+            }
+            if (outlierCount > 0) {
+                log.info("AllocationEngineService: removed {} outliers (center={},{} p90={:.1f}km threshold={:.1f}km)",
+                        outlierCount, medianLat, medianLng, p90, threshold);
+            }
+            allocatableShipments = kept;
+        }
+
         List<String> presentSrNames = store.getPresentSrNames(date);
         if (presentSrNames.isEmpty()) {
             throw new NoPresentSrsException("At least one SR must be marked present before running allocation.");
