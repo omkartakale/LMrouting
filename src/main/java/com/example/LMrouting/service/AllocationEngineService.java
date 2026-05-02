@@ -74,7 +74,7 @@ public class AllocationEngineService {
 
         // ── Outlier detection: remove points with no neighbor within 2 km ──────
         double outlierRadiusKm = 2.0;
-        int minNeighbors = 1; // must have at least 1 neighbor within radius
+        int minNeighbors = 3; // must have at least 3 neighbors within radius
         List<Shipment> nonOutliers = new ArrayList<>();
         List<Shipment> outliers = new ArrayList<>();
 
