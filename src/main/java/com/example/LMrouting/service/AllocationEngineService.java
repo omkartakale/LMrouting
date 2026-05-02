@@ -488,6 +488,21 @@ public class AllocationEngineService {
     }
 
     private String formatDate(LocalDate date) {
-        return date.toString();
+        // Try to find the date in the store using common formats
+        // The store keys are raw strings from CSV (e.g. "02-May-26", "24-Mar-26")
+        java.time.format.DateTimeFormatter[] fmts = {
+            java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", java.util.Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d-MMM-yy", java.util.Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy", java.util.Locale.ENGLISH),
+        };
+        for (var fmt : fmts) {
+            String candidate = date.format(fmt);
+            if (store.hasShipmentsForDate(candidate)) return candidate;
+        }
+        // Fallback to ISO
+        String iso = date.toString();
+        if (store.hasShipmentsForDate(iso)) return iso;
+        // Return dd-MMM-yy as default format
+        return date.format(fmts[0]);
     }
 }

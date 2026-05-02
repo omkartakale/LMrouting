@@ -1,15 +1,17 @@
 package com.example.LMrouting.controller;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-@Controller
+import java.util.Map;
+
+/**
+ * Provides hub configuration to the frontend via API.
+ * The frontend is served as a static HTML file from /static/index.html.
+ */
+@RestController
 public class WebController {
-
-    @Value("${google.maps.api.key:}")
-    private String apiKey;
 
     @Value("${hub.latitude:18.4600561}")
     private double hubLat;
@@ -20,12 +22,12 @@ public class WebController {
     @Value("${hub.name:PNQ HDP}")
     private String hubName;
 
-    @GetMapping("/")
-    public String index(Model model) {
-        model.addAttribute("apiKey", apiKey);
-        model.addAttribute("hubLat", hubLat);
-        model.addAttribute("hubLng", hubLng);
-        model.addAttribute("hubName", hubName);
-        return "index";
+    @GetMapping("/api/hub")
+    public Map<String, Object> getHubConfig() {
+        return Map.of(
+            "hubName", hubName,
+            "hubLat", hubLat,
+            "hubLng", hubLng
+        );
     }
 }

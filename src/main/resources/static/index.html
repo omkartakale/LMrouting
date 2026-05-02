@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -137,7 +137,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 <header id="header">
   <h1>&#x1F69A; Shipment Allocation Optimizer</h1>
   <div id="header-right">
-    <span id="hub-info" th:text="${hubName + ' - ' + hubLat + ', ' + hubLng}">Hub</span>
+    <span id="hub-info">Hub</span>
     <span id="routing-badge">Loading...</span>
   </div>
 </header>
@@ -223,10 +223,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </div>
 </dialog>
 
-<script th:inline="javascript">
-/*<![CDATA[*/
-var HUB_LAT = /*[[${hubLat}]]*/ 18.4600561;
-var HUB_LNG = /*[[${hubLng}]]*/ 73.8884305;
+<script>
+var HUB_LAT = 18.4600561;
+var HUB_LNG = 73.8884305;
 var SR_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#c0ca33','#6d4c41','#546e7a','#d81b60','#039be5','#00897b','#ffb300','#5e35b1','#1565c0','#2e7d32','#ef6c00'];
 
 var map, hubMarker;
@@ -240,7 +239,9 @@ var selectedFile = null;
 
 function esc(s) {
   if (s == null) return '';
-  return String(s).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,'&#39;');
+  var div = document.createElement('div');
+  div.appendChild(document.createTextNode(String(s)));
+  return div.innerHTML;
 }
 
 function showAllocError(msg) {
@@ -276,6 +277,13 @@ function initMap() {
 }
 
 function loadConfig() {
+  fetch('/api/hub')
+    .then(function(r) { return r.json(); })
+    .then(function(hub) {
+      document.getElementById('hub-info').textContent = hub.hubName + ' - ' + hub.hubLat + ', ' + hub.hubLng;
+    })
+    .catch(function() {});
+
   fetch('/api/config')
     .then(function(r) { return r.json(); })
     .then(function(cfg) {

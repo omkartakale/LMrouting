@@ -39,7 +39,7 @@ public class CsvIngestionService {
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024 * 1024; // 20 MB (xlsx can be larger)
 
     private static final List<String> REQUIRED_COLUMNS = List.of(
-            "shipping_id", "allocation_date", "drop_latitude", "drop_longitude"
+            "shipping_id", "drop_latitude", "drop_longitude"
     );
 
     // Column name aliases — maps normalized variants to canonical names
@@ -72,6 +72,7 @@ public class CsvIngestionService {
         // drop_latitude aliases
         put("latitude", "drop_latitude");
         put("lat", "drop_latitude");
+        put("droplatitude", "drop_latitude");
         put("drop_lat", "drop_latitude");
         put("delivery_latitude", "drop_latitude");
         put("dest_latitude", "drop_latitude");
@@ -82,6 +83,7 @@ public class CsvIngestionService {
         // drop_longitude aliases
         put("longitude", "drop_longitude");
         put("lng", "drop_longitude");
+        put("droplongitude", "drop_longitude");
         put("lon", "drop_longitude");
         put("long", "drop_longitude");
         put("drop_lng", "drop_longitude");
@@ -477,7 +479,9 @@ public class CsvIngestionService {
 
         String allocationDate = get(cols, colIndex, "allocation_date");
         if (allocationDate == null || allocationDate.isBlank()) {
-            return ParseResult.error("allocation_date is blank");
+            // Default to today's date in dd-MMM-yy format if not provided
+            allocationDate = java.time.LocalDate.now()
+                    .format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", java.util.Locale.ENGLISH));
         }
 
         double lat = parseDouble(get(cols, colIndex, "drop_latitude"), 0.0);
