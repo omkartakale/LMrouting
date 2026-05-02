@@ -72,8 +72,42 @@ public class AllocationEngineService {
                 .filter(s -> s.getDropLatitude() != 0 && s.getDropLongitude() != 0)
                 .collect(java.util.stream.Collectors.toList());
 
-        log.info("AllocationEngineService: {} total shipments, {} within range (excluded {} out-of-range)",
-                allShipments.size(), allocatableShipments.size(), allShipments.size() - allocatableShipments.size());
+        // ── Outlier detection: remove points with no neighbor within 2 km ──────
+        double outlierRadiusKm = 2.0;
+        int minNeighbors = 1; // must have at least 1 neighbor within radius
+        List<Shipment> nonOutliers = new ArrayList<>();
+        List<Shipment> outliers = new ArrayList<>();
+
+        for (int i = 0; i < allocatableShipments.size(); i++) {
+            Shipment s = allocatableShipments.get(i);
+            int neighborCount = 0;
+            for (int j = 0; j < allocatableShipments.size() && neighborCount < minNeighbors; j++) {
+                if (i == j) continue;
+                Shipment other = allocatableShipments.get(j);
+                double dist = GoogleMapsService.haversine(
+                        s.getDropLatitude(), s.getDropLongitude(),
+                        other.getDropLatitude(), other.getDropLongitude());
+                if (dist <= outlierRadiusKm) {
+                    neighborCount++;
+                }
+            }
+            if (neighborCount >= minNeighbors) {
+                nonOutliers.add(s);
+            } else {
+                outliers.add(s);
+                s.setOutOfRange(true); // mark as outlier so UI shows it
+            }
+        }
+
+        if (!outliers.isEmpty()) {
+            log.info("AllocationEngineService: detected {} outlier shipments (no neighbor within {} km), excluding from allocation",
+                    outliers.size(), outlierRadiusKm);
+        }
+        allocatableShipments = nonOutliers;
+
+        log.info("AllocationEngineService: {} total shipments, {} allocatable (excluded {} out-of-range, {} outliers)",
+                allShipments.size(), allocatableShipments.size(),
+                allShipments.size() - allocatableShipments.size() - outliers.size(), outliers.size());
 
         List<String> presentSrNames = store.getPresentSrNames(date);
         if (presentSrNames.isEmpty()) {
