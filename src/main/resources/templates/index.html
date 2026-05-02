@@ -1,464 +1,910 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LM Routing - Last Mile Shipment Router</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f0f2f5; }
-        .header { background: #1a73e8; color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; }
-        .header h1 { font-size: 20px; font-weight: 500; }
-        .header .hub-info { font-size: 13px; opacity: 0.9; }
-        .container { display: flex; height: calc(100vh - 52px); }
-        .sidebar { width: 380px; background: white; overflow-y: auto; border-right: 1px solid #ddd; }
-        .map-area { flex: 1; position: relative; }
-        #map { width: 100%; height: 100%; }
-
-        .panel { padding: 16px; border-bottom: 1px solid #eee; }
-        .panel h3 { font-size: 14px; color: #333; margin-bottom: 10px; }
-        .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
-        .form-row label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
-        .form-row input, .form-row select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
-        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
-        .btn-primary { background: #1a73e8; color: white; }
-        .btn-primary:hover { background: #1557b0; }
-        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
-
-        .summary-card { background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 8px; }
-        .summary-card .stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
-        .summary-card .stat .label { color: #666; }
-        .summary-card .stat .value { font-weight: 600; color: #333; }
-
-        .sr-list { list-style: none; }
-        .sr-item { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.15s; }
-        .sr-item:hover { background: #e8f0fe; }
-        .sr-item.active { background: #d2e3fc; border-left: 3px solid #1a73e8; }
-        .sr-item .sr-name { font-size: 13px; font-weight: 500; }
-        .sr-item .sr-count { font-size: 12px; color: #666; background: #eee; padding: 2px 8px; border-radius: 10px; }
-
-        .stop-list { list-style: none; max-height: 300px; overflow-y: auto; }
-        .stop-item { padding: 8px 12px; border-bottom: 1px solid #f5f5f5; font-size: 12px; display: flex; gap: 8px; align-items: center; }
-        .stop-num { background: #1a73e8; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; flex-shrink: 0; }
-        .stop-details { flex: 1; }
-        .stop-details .pincode { font-weight: 500; }
-        .stop-details .meta { color: #888; font-size: 11px; }
-
-        .route-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-        .route-stat { background: #e8f0fe; padding: 8px; border-radius: 6px; text-align: center; }
-        .route-stat .num { font-size: 18px; font-weight: 600; color: #1a73e8; }
-        .route-stat .lbl { font-size: 11px; color: #666; }
-
-        .loading { text-align: center; padding: 20px; color: #888; }
-        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 8px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        .legend { position: absolute; bottom: 20px; left: 20px; background: white; padding: 10px 14px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; z-index: 10; }
-        .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
-        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
-    </style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Shipment Allocation Optimizer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f0f2f5}
+#header{background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;padding:0 20px;height:56px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,.25);z-index:1000}
+#header h1{font-size:1.15rem;font-weight:700;letter-spacing:.3px}
+#header-right{display:flex;align-items:center;gap:12px;font-size:.82rem}
+#hub-info{opacity:.9}
+#routing-badge{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:20px;padding:3px 10px;font-size:.78rem;white-space:nowrap}
+#main{display:flex;flex:1;overflow:hidden}
+#sidebar{width:420px;flex-shrink:0;overflow-y:auto;background:#f8f9fa;border-right:1px solid #dee2e6;display:flex;flex-direction:column}
+#sidebar::-webkit-scrollbar{width:6px}
+#sidebar::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:3px}
+#map-container{flex:1;position:relative}
+#map{width:100%;height:100%}
+.panel{background:#fff;border-bottom:1px solid #e9ecef;padding:16px}
+.panel-title{font-size:.9rem;font-weight:700;color:#343a40;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel-title span.badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:600}
+#drop-zone{border:2px dashed #adb5bd;border-radius:8px;padding:24px 16px;text-align:center;cursor:pointer;transition:all .2s;color:#6c757d;font-size:.85rem;background:#fafbfc;user-select:none}
+#drop-zone:hover,#drop-zone.drag-over{border-color:#1976d2;background:#e8f0fe;color:#1565c0}
+#drop-zone svg{display:block;margin:0 auto 8px}
+#file-info{margin-top:8px;font-size:.8rem;color:#495057;display:none;line-height:1.5}
+#upload-btn{margin-top:10px;width:100%;padding:9px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:.85rem;font-weight:600;cursor:pointer;transition:background .2s;display:none}
+#upload-btn:hover:not(:disabled){background:#1565c0}
+#upload-btn:disabled{background:#90a4ae;cursor:not-allowed}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.result-card{margin-top:10px;padding:12px;border-radius:8px;font-size:.82rem}
+.result-card.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
+.result-card.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
+.result-card.info{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
+.result-card .stat-row{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.result-card .stat{text-align:center}
+.result-card .stat .val{font-size:1.2rem;font-weight:700}
+.result-card .stat .lbl{font-size:.72rem;color:#555;margin-top:1px}
+.date-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.date-chip{background:#1976d2;color:#fff;border:none;border-radius:14px;padding:3px 10px;font-size:.75rem;cursor:pointer;transition:background .2s}
+.date-chip:hover{background:#1565c0}
+.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;font-size:.8rem;font-weight:600;user-select:none}
+.collapsible-header .arrow{transition:transform .2s;font-size:.7rem}
+.collapsible-header.open .arrow{transform:rotate(180deg)}
+.collapsible-body{display:none;font-size:.78rem;max-height:120px;overflow-y:auto;padding:4px 0}
+.collapsible-body.open{display:block}
+.warn-section{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:8px 10px;margin-top:8px}
+.err-section{background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:8px 10px;margin-top:8px}
+.warn-section .collapsible-header{color:#e65100}
+.err-section .collapsible-header{color:#b71c1c}
+.warn-item,.err-item{padding:2px 0;border-bottom:1px solid rgba(0,0,0,.06);line-height:1.4}
+select{width:100%;padding:7px 10px;border:1px solid #ced4da;border-radius:6px;font-size:.85rem;background:#fff;color:#343a40;margin-bottom:10px}
+select:focus{outline:none;border-color:#1976d2;box-shadow:0 0 0 2px rgba(25,118,210,.15)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{padding:7px 14px;border:none;border-radius:6px;font-size:.82rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn-primary{background:#1976d2;color:#fff}
+.btn-primary:hover:not(:disabled){background:#1565c0}
+.btn-primary:disabled{background:#90a4ae;cursor:not-allowed}
+.btn-secondary{background:#e9ecef;color:#495057;border:1px solid #ced4da}
+.btn-secondary:hover:not(:disabled){background:#dee2e6}
+.btn-secondary:disabled{opacity:.5;cursor:not-allowed}
+.banner{padding:8px 12px;border-radius:6px;font-size:.82rem;font-weight:600;margin-top:8px;display:none}
+.banner.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
+.banner.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
+.sr-attendance-item{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f3f5;font-size:.83rem}
+.sr-attendance-item:last-child{border-bottom:none}
+.toggle-switch{position:relative;display:inline-block;width:38px;height:20px;flex-shrink:0}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:20px;transition:.3s}
+.toggle-slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+input:checked+.toggle-slider{background:#43a047}
+input:checked+.toggle-slider:before{transform:translateX(18px)}
+.toggle-switch input:disabled+.toggle-slider{opacity:.5;cursor:not-allowed}
+.summary-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-box{background:#f8f9fa;border:1px solid #e9ecef;border-radius:8px;padding:10px;text-align:center}
+.stat-box .val{font-size:1.3rem;font-weight:700;color:#1565c0}
+.stat-box .lbl{font-size:.72rem;color:#6c757d;margin-top:2px}
+.sr-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s;border:1px solid transparent;margin-bottom:4px}
+.sr-item:hover{background:#e8f0fe;border-color:#bbdefb}
+.sr-item.active{background:#e3f2fd;border-color:#1976d2}
+.sr-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.sr-item-info{flex:1;min-width:0}
+.sr-item-name{font-size:.85rem;font-weight:600;color:#212529}
+.sr-item-sub{font-size:.73rem;color:#6c757d;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-item-badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.72rem;font-weight:700;flex-shrink:0}
+.route-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.stop-list{max-height:280px;overflow-y:auto}
+.stop-list::-webkit-scrollbar{width:4px}
+.stop-list::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:2px}
+.stop-item{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid #f1f3f5;font-size:.8rem;cursor:pointer}
+.stop-item:hover{background:#f8f9fa}
+.stop-item:last-child{border-bottom:none}
+.stop-seq{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
+.stop-info{flex:1;min-width:0}
+.stop-pincode{font-weight:600;color:#212529}
+.stop-id{color:#6c757d;font-size:.75rem;margin-top:1px;word-break:break-all}
+.stop-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+.stop-tag{background:#e9ecef;color:#495057;border-radius:4px;padding:1px 5px;font-size:.7rem}
+.stop-tag.override{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
+.stop-tag.oor{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
+.stop-tag.heavy{background:#f3e5f5;color:#6a1b9a}
+#map-legend{position:absolute;bottom:24px;left:10px;z-index:1000;background:rgba(255,255,255,.95);border:1px solid #dee2e6;border-radius:8px;padding:10px 12px;font-size:.75rem;max-height:220px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+#map-legend h4{font-size:.78rem;font-weight:700;margin-bottom:6px;color:#343a40}
+.legend-item{display:flex;align-items:center;gap:6px;padding:2px 0}
+.legend-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+dialog{border:none;border-radius:12px;padding:0;box-shadow:0 8px 32px rgba(0,0,0,.25);max-width:400px;width:90%}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.modal-header{background:#1976d2;color:#fff;padding:14px 18px;border-radius:12px 12px 0 0;font-weight:700;font-size:.95rem}
+.modal-body{padding:16px 18px}
+.modal-info{background:#f8f9fa;border-radius:6px;padding:10px;margin-bottom:12px;font-size:.83rem}
+.modal-info strong{color:#1565c0}
+.sr-radio-list{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.sr-radio-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #dee2e6;border-radius:6px;cursor:pointer;transition:background .15s;font-size:.83rem}
+.sr-radio-item:hover{background:#e8f0fe}
+.sr-radio-item input{accent-color:#1976d2}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e9ecef}
+.leaflet-popup-content{font-size:.82rem;min-width:180px}
+.popup-title{font-weight:700;font-size:.88rem;margin-bottom:6px;color:#1565c0}
+.popup-row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid #f1f3f5}
+.popup-row:last-of-type{border-bottom:none}
+.popup-label{color:#6c757d}
+.popup-val{font-weight:600;color:#212529}
+.popup-oor{background:#ffebee;color:#c62828;border-radius:4px;padding:1px 6px;font-size:.72rem;font-weight:700;display:inline-block;margin-top:4px}
+.popup-reassign{margin-top:8px;width:100%;padding:5px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:.78rem;font-weight:600;cursor:pointer}
+.popup-reassign:hover{background:#1565c0}
+.hidden{display:none!important}
+.loading-text{color:#6c757d;font-size:.82rem;text-align:center;padding:12px 0}
+.empty-text{color:#adb5bd;font-size:.82rem;text-align:center;padding:16px 0;font-style:italic}
+</style>
 </head>
 <body>
-    <div class="header">
-        <div>
-            <h1>🚚 Last Mile Routing</h1>
-        </div>
-        <div class="hub-info">
-            Hub: <strong th:text="${hubName}">PNQ HDP</strong> |
-            <span th:text="${hubLat}">18.46</span>, <span th:text="${hubLng}">73.89</span>
-        </div>
+
+<header id="header">
+  <h1>&#x1F69A; Shipment Allocation Optimizer</h1>
+  <div id="header-right">
+    <span id="hub-info" th:text="${hubName + ' - ' + hubLat + ', ' + hubLng}">Hub</span>
+    <span id="routing-badge">Loading...</span>
+  </div>
+</header>
+
+<div id="main">
+  <aside id="sidebar">
+
+    <div class="panel">
+      <div class="panel-title">Upload Shipment File</div>
+      <div id="drop-zone">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#adb5bd" stroke-width="1.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Drag and drop CSV / XLSX here, or click to browse
+      </div>
+      <input type="file" id="csv-file-input" accept=".csv,.txt,.xlsx,.xls" style="display:none"/>
+      <div id="file-info"></div>
+      <button id="upload-btn">Upload</button>
+      <div id="upload-result"></div>
     </div>
 
-    <div class="container">
-        <div class="sidebar">
-            <!-- Controls -->
-            <div class="panel">
-                <h3>⚙️ Route Configuration</h3>
-                <div class="form-row">
-                    <div style="flex:1">
-                        <label>Allocation Date</label>
-                        <select id="dateSelect">
-                            <option value="24-Mar-26">24-Mar-26</option>
-                        </select>
-                    </div>
-                    <div style="flex:1">
-                        <label>Number of SRs</label>
-                        <input type="number" id="srCount" value="10" min="1" max="100">
-                    </div>
-                </div>
-                <button class="btn btn-primary" id="runBtn" onclick="runRouting()" style="width:100%">
-                    🔄 Generate Routes
-                </button>
-            </div>
-
-            <!-- Summary -->
-            <div class="panel" id="summaryPanel" style="display:none">
-                <h3>📊 Routing Summary</h3>
-                <div class="summary-card" id="summaryCard"></div>
-            </div>
-
-            <!-- SR List -->
-            <div class="panel" id="srPanel" style="display:none">
-                <h3>👷 Service Representatives</h3>
-                <ul class="sr-list" id="srList"></ul>
-            </div>
-
-            <!-- Route Details -->
-            <div class="panel" id="routePanel" style="display:none">
-                <h3 id="routeTitle">📍 Route Details</h3>
-                <div class="route-stats" id="routeStats"></div>
-                <ul class="stop-list" id="stopList"></ul>
-            </div>
-        </div>
-
-        <div class="map-area">
-            <div id="map"></div>
-            <div class="legend" id="legend" style="display:none">
-                <strong>Legend</strong>
-                <div class="legend-item">
-                    <div class="legend-dot" style="background:#e53935"></div> Hub
-                </div>
-                <div id="legendItems"></div>
-            </div>
-        </div>
+    <div class="panel">
+      <div class="panel-title">Allocation</div>
+      <select id="date-select">
+        <option value="">-- Select date --</option>
+      </select>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="run-btn">Run Allocation</button>
+        <button class="btn btn-secondary" id="undo-btn" disabled>Undo</button>
+        <button class="btn btn-secondary" id="finalize-btn" disabled>Finalize</button>
+      </div>
+      <div id="alloc-error" class="banner error"></div>
+      <div id="finalized-banner" class="banner success">Allocation finalized - overrides locked</div>
     </div>
 
-    <script>
-        const HUB_LAT = [[${hubLat}]];
-        const HUB_LNG = [[${hubLng}]];
-        const API_KEY = '[[${apiKey}]]';
+    <div class="panel">
+      <div class="panel-title">
+        SR Attendance
+        <span class="badge" id="present-count-badge">0 present</span>
+      </div>
+      <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
+    </div>
 
-        let map, hubMarker;
-        let srMarkers = {};
-        let srPolylines = {};
-        let currentSR = null;
+    <div class="panel hidden" id="summary-panel">
+      <div class="panel-title">Summary</div>
+      <div class="summary-stats" id="summary-stats"></div>
+    </div>
 
-        const SR_COLORS = [
-            '#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa',
-            '#00acc1', '#f4511e', '#3949ab', '#7cb342', '#c0ca33',
-            '#6d4c41', '#546e7a', '#d81b60', '#039be5', '#00897b',
-            '#ffb300', '#5e35b1', '#1565c0', '#2e7d32', '#ef6c00'
-        ];
+    <div class="panel hidden" id="sr-list-panel">
+      <div class="panel-title">Service Representatives</div>
+      <div id="sr-list"></div>
+    </div>
 
-        function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: HUB_LAT, lng: HUB_LNG },
-                zoom: 13,
-                styles: [
-                    { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-                    { featureType: 'transit', stylers: [{ visibility: 'off' }] }
-                ]
-            });
+    <div class="panel hidden" id="route-panel">
+      <div class="panel-title" id="route-panel-title">Route</div>
+      <div class="route-stats" id="route-stats"></div>
+      <div class="stop-list" id="stop-list"></div>
+    </div>
 
-            hubMarker = new google.maps.Marker({
-                position: { lat: HUB_LAT, lng: HUB_LNG },
-                map: map,
-                title: 'Hub: PNQ HDP',
-                icon: {
-                    path: google.maps.SymbolPath.CIRCLE,
-                    scale: 12,
-                    fillColor: '#e53935',
-                    fillOpacity: 1,
-                    strokeColor: '#fff',
-                    strokeWeight: 3
-                },
-                zIndex: 1000
-            });
+  </aside>
 
-            // Load dates
-            fetch('/api/dates').then(r => r.json()).then(dates => {
-                if (dates.length > 0) {
-                    const sel = document.getElementById('dateSelect');
-                    sel.innerHTML = '';
-                    dates.forEach(d => {
-                        const opt = document.createElement('option');
-                        opt.value = d; opt.textContent = d;
-                        sel.appendChild(opt);
-                    });
-                }
-            });
-        }
+  <div id="map-container">
+    <div id="map"></div>
+    <div id="map-legend">
+      <h4>Legend</h4>
+      <div id="legend-items"></div>
+    </div>
+  </div>
+</div>
 
-        async function runRouting() {
-            const date = document.getElementById('dateSelect').value;
-            const srCount = document.getElementById('srCount').value;
-            const btn = document.getElementById('runBtn');
+<dialog id="override-modal">
+  <div class="modal-header">Reassign Shipment</div>
+  <div class="modal-body">
+    <div class="modal-info" id="modal-info"></div>
+    <div style="font-size:.82rem;font-weight:600;margin-bottom:8px;color:#343a40">Select new SR:</div>
+    <div class="sr-radio-list" id="sr-radio-list"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+    <button class="btn btn-primary" id="modal-confirm-btn">Confirm Reassign</button>
+  </div>
+</dialog>
 
-            btn.disabled = true;
-            btn.textContent = '⏳ Generating...';
-            clearMap();
+<script th:inline="javascript">
+/*<![CDATA[*/
+var HUB_LAT = /*[[${hubLat}]]*/ 18.4600561;
+var HUB_LNG = /*[[${hubLng}]]*/ 73.8884305;
+var SR_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#c0ca33','#6d4c41','#546e7a','#d81b60','#039be5','#00897b','#ffb300','#5e35b1','#1565c0','#2e7d32','#ef6c00'];
 
-            try {
-                const resp = await fetch(`/api/route?date=${encodeURIComponent(date)}&srCount=${srCount}`, {
-                    method: 'POST'
-                });
-                const summary = await resp.json();
-                showSummary(summary);
-                showSRList(summary.srSummaries);
-            } catch (e) {
-                alert('Error: ' + e.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '🔄 Generate Routes';
-            }
-        }
+var map, hubMarker;
+var srLayers = {};
+var currentSrName = null;
+var currentSrIndex = 0;
+var allocationFinalized = false;
+var presentSrNames = [];
+var pendingReassign = null;
+var selectedFile = null;
 
-        function showSummary(summary) {
-            document.getElementById('summaryPanel').style.display = 'block';
-            document.getElementById('summaryCard').innerHTML = `
-                <div class="stat"><span class="label">Total Shipments</span><span class="value">${summary.totalShipments}</span></div>
-                <div class="stat"><span class="label">Total SRs</span><span class="value">${summary.totalSRs}</span></div>
-                <div class="stat"><span class="label">Avg per SR</span><span class="value">${Math.round(summary.totalShipments / summary.totalSRs)}</span></div>
-                <div class="stat"><span class="label">Pincodes</span><span class="value">${summary.pincodes.join(', ')}</span></div>
-            `;
-        }
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,'&#39;');
+}
 
-        function showSRList(srSummaries) {
-            document.getElementById('srPanel').style.display = 'block';
-            const list = document.getElementById('srList');
-            list.innerHTML = '';
+function showAllocError(msg) {
+  var el = document.getElementById('alloc-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(function() { el.style.display = 'none'; }, 8000);
+}
 
-            srSummaries.forEach((sr, i) => {
-                const li = document.createElement('li');
-                li.className = 'sr-item';
-                li.innerHTML = `
-                    <div>
-                        <div class="sr-name" style="color:${SR_COLORS[i % SR_COLORS.length]}">● ${sr.srName}</div>
-                        <div style="font-size:11px;color:#888;margin-top:2px">${sr.pincodesCovered.join(', ')}</div>
-                    </div>
-                    <span class="sr-count">${sr.shipmentCount}</span>
-                `;
-                li.onclick = () => loadSRRoute(sr.srName, i);
-                list.appendChild(li);
-            });
+function hideAllocError() {
+  document.getElementById('alloc-error').style.display = 'none';
+}
 
-            // Show all SR markers on map
-            showAllSRsOnMap(srSummaries);
-        }
+// ── MAP ──────────────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map').setView([HUB_LAT, HUB_LNG], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
 
-        async function showAllSRsOnMap(srSummaries) {
-            document.getElementById('legend').style.display = 'block';
-            const legendItems = document.getElementById('legendItems');
-            legendItems.innerHTML = '';
+  hubMarker = L.marker([HUB_LAT, HUB_LNG], {
+    icon: L.divIcon({
+      className: '',
+      html: '<div style="width:20px;height:20px;background:#e53935;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    }),
+    zIndexOffset: 1000,
+    title: 'Hub'
+  }).addTo(map).bindPopup('<b>Hub</b>');
 
-            for (let i = 0; i < srSummaries.length; i++) {
-                const sr = srSummaries[i];
-                const color = SR_COLORS[i % SR_COLORS.length];
+  loadConfig();
+}
 
-                legendItems.innerHTML += `
-                    <div class="legend-item">
-                        <div class="legend-dot" style="background:${color}"></div>
-                        ${sr.srName} (${sr.shipmentCount})
-                    </div>
-                `;
+function loadConfig() {
+  fetch('/api/config')
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      var b = document.getElementById('routing-badge');
+      if (cfg.orsConfigured) {
+        b.textContent = 'Real Roads (ORS)';
+        b.style.background = 'rgba(67,160,71,.35)';
+      } else if (cfg.googleMapsConfigured) {
+        b.textContent = 'Real Roads (Google)';
+        b.style.background = 'rgba(67,160,71,.35)';
+      } else {
+        b.textContent = 'Straight Lines';
+      }
+    })
+    .catch(function() {
+      document.getElementById('routing-badge').textContent = 'Straight Lines';
+    });
+}
 
-                // Load route for each SR
-                try {
-                    const resp = await fetch(`/api/route/${encodeURIComponent(sr.srName)}`);
-                    const route = await resp.json();
-                    addSRToMap(sr.srName, route, color, i);
-                } catch (e) {
-                    console.error('Error loading route for', sr.srName, e);
-                }
-            }
-        }
+// ── FILE UPLOAD ───────────────────────────────────────────────────────────────
+function initUpload() {
+  var dz = document.getElementById('drop-zone');
+  var fi = document.getElementById('csv-file-input');
+  var ub = document.getElementById('upload-btn');
 
-        function addSRToMap(srName, route, color, index) {
-            if (!route.stops || route.stops.length === 0) return;
+  dz.addEventListener('click', function() {
+    fi.value = '';
+    fi.click();
+  });
 
-            srMarkers[srName] = [];
+  dz.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    dz.classList.add('drag-over');
+  });
 
-            // Add markers for each stop
-            route.stops.forEach((stop, i) => {
-                const marker = new google.maps.Marker({
-                    position: { lat: stop.latitude, lng: stop.longitude },
-                    map: map,
-                    title: `${srName} - Stop ${stop.sequence}: ${stop.dropPincode}`,
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 6,
-                        fillColor: color,
-                        fillOpacity: 0.8,
-                        strokeColor: '#fff',
-                        strokeWeight: 1.5
-                    },
-                    zIndex: 100 + index
-                });
+  dz.addEventListener('dragleave', function() {
+    dz.classList.remove('drag-over');
+  });
 
-                const infoWindow = new google.maps.InfoWindow({
-                    content: `<div style="font-size:12px">
-                        <strong>${srName} - Stop #${stop.sequence}</strong><br>
-                        Pincode: ${stop.dropPincode}<br>
-                        ID: ${stop.shippingId}<br>
-                        Type: ${stop.orderType} | ${stop.weight}kg
-                    </div>`
-                });
-                marker.addListener('click', () => infoWindow.open(map, marker));
-                srMarkers[srName].push(marker);
-            });
+  dz.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    var f = e.dataTransfer.files[0];
+    if (f) handleFileSelected(f);
+  });
 
-            // Draw polyline
-            if (route.polylinePoints && route.polylinePoints.length > 0) {
-                const path = route.polylinePoints.map(p => ({ lat: p.lat, lng: p.lng }));
-                const polyline = new google.maps.Polyline({
-                    path: path,
-                    geodesic: true,
-                    strokeColor: color,
-                    strokeOpacity: 0.7,
-                    strokeWeight: 3,
-                    map: map
-                });
-                srPolylines[srName] = polyline;
-            }
-        }
+  fi.addEventListener('change', function() {
+    if (fi.files && fi.files[0]) {
+      handleFileSelected(fi.files[0]);
+    }
+  });
 
-        async function loadSRRoute(srName, index) {
-            // Highlight active SR
-            document.querySelectorAll('.sr-item').forEach((el, i) => {
-                el.classList.toggle('active', i === index);
-            });
+  ub.addEventListener('click', function() {
+    doUpload();
+  });
+}
 
-            currentSR = srName;
-            document.getElementById('routePanel').style.display = 'block';
-            document.getElementById('routeTitle').textContent = `📍 Route: ${srName}`;
-            document.getElementById('routeStats').innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
-            document.getElementById('stopList').innerHTML = '';
+function handleFileSelected(f) {
+  selectedFile = null;
+  var info = document.getElementById('file-info');
+  var btn = document.getElementById('upload-btn');
+  var result = document.getElementById('upload-result');
 
-            try {
-                const resp = await fetch(`/api/route/${encodeURIComponent(srName)}`);
-                const route = await resp.json();
-                showRouteDetails(route, index);
-            } catch (e) {
-                document.getElementById('routeStats').innerHTML = '<div class="loading">Error loading route</div>';
-            }
-        }
+  result.innerHTML = '';
+  info.style.display = 'none';
+  btn.style.display = 'none';
 
-        function showRouteDetails(route, index) {
-            const color = SR_COLORS[index % SR_COLORS.length];
+  var ext = f.name.split('.').pop().toLowerCase();
+  var allowed = ['csv', 'txt', 'xlsx', 'xls'];
 
-            document.getElementById('routeStats').innerHTML = `
-                <div class="route-stat"><div class="num">${route.totalShipments}</div><div class="lbl">Stops</div></div>
-                <div class="route-stat"><div class="num">${route.totalDistanceKm}</div><div class="lbl">km Distance</div></div>
-                <div class="route-stat"><div class="num">${route.totalDurationMinutes}</div><div class="lbl">min Duration</div></div>
-                <div class="route-stat"><div class="num">${route.stops.length > 0 ? route.stops.map(s => s.dropPincode).filter((v,i,a) => a.indexOf(v) === i).length : 0}</div><div class="lbl">Pincodes</div></div>
-            `;
+  if (allowed.indexOf(ext) === -1) {
+    info.innerHTML = '<span style="color:#c62828">Invalid file type: .' + esc(ext) + '. Allowed: .csv .xlsx .xls</span>';
+    info.style.display = 'block';
+    return;
+  }
 
-            const list = document.getElementById('stopList');
-            list.innerHTML = '';
-            route.stops.forEach(stop => {
-                const li = document.createElement('li');
-                li.className = 'stop-item';
-                li.innerHTML = `
-                    <div class="stop-num" style="background:${color}">${stop.sequence}</div>
-                    <div class="stop-details">
-                        <div class="pincode">${stop.dropPincode}</div>
-                        <div class="meta">${stop.shippingId} | ${stop.orderType} | ${stop.weight}kg</div>
-                    </div>
-                `;
-                li.onclick = () => {
-                    map.panTo({ lat: stop.latitude, lng: stop.longitude });
-                    map.setZoom(16);
-                };
-                list.appendChild(li);
-            });
+  if (f.size > 20 * 1024 * 1024) {
+    info.innerHTML = '<span style="color:#c62828">File too large (' + (f.size / 1024 / 1024).toFixed(1) + ' MB). Max 20 MB.</span>';
+    info.style.display = 'block';
+    return;
+  }
 
-            // Zoom to this SR's route
-            if (route.stops.length > 0) {
-                const bounds = new google.maps.LatLngBounds();
-                bounds.extend({ lat: HUB_LAT, lng: HUB_LNG });
-                route.stops.forEach(s => bounds.extend({ lat: s.latitude, lng: s.longitude }));
-                map.fitBounds(bounds, 50);
-            }
-        }
+  selectedFile = f;
+  var sizeMB = (f.size / 1024 / 1024).toFixed(2);
+  info.innerHTML = 'File: <strong>' + esc(f.name) + '</strong> (' + sizeMB + ' MB) - Ready to upload';
+  info.style.display = 'block';
+  btn.style.display = 'block';
+  btn.disabled = false;
+  btn.textContent = 'Upload';
+}
 
-        function clearMap() {
-            Object.values(srMarkers).flat().forEach(m => m.setMap(null));
-            Object.values(srPolylines).forEach(p => p.setMap(null));
-            srMarkers = {};
-            srPolylines = {};
-            document.getElementById('summaryPanel').style.display = 'none';
-            document.getElementById('srPanel').style.display = 'none';
-            document.getElementById('routePanel').style.display = 'none';
-            document.getElementById('legend').style.display = 'none';
-        }
-    </script>
+function doUpload() {
+  if (!selectedFile) return;
 
-    <script th:if="${apiKey != null and apiKey != '' and apiKey != 'YOUR_GOOGLE_MAPS_API_KEY'}"
-            th:src="'https://maps.googleapis.com/maps/api/js?key=' + ${apiKey} + '&callback=initMap'" async defer></script>
+  var btn = document.getElementById('upload-btn');
+  var result = document.getElementById('upload-result');
 
-    <!-- Fallback: use Leaflet if no Google Maps API key -->
-    <script th:if="${apiKey == null or apiKey == '' or apiKey == 'YOUR_GOOGLE_MAPS_API_KEY'}">
-        // Load Leaflet as fallback
-        document.head.innerHTML += '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>';
-        var s = document.createElement('script');
-        s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        s.onload = initLeafletMap;
-        document.body.appendChild(s);
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Uploading...';
+  result.innerHTML = '<div class="result-card info">Parsing file, please wait...</div>';
 
-        function initLeafletMap() {
-            // Override Google Maps API with Leaflet equivalents
-            window.google = { maps: createLeafletShim() };
-            initMap();
-        }
+  var fd = new FormData();
+  fd.append('file', selectedFile);
 
-        function createLeafletShim() {
-            let leafletMap;
-            const markers = [];
-            const polylines = [];
+  fetch('/api/csv/upload', { method: 'POST', body: fd })
+    .then(function(r) {
+      return r.json().then(function(d) {
+        return { ok: r.ok, status: r.status, data: d };
+      });
+    })
+    .then(function(res) {
+      btn.disabled = false;
+      btn.textContent = 'Re-upload';
 
-            return {
-                SymbolPath: { CIRCLE: 'circle' },
-                Map: function(el, opts) {
-                    leafletMap = L.map(el).setView([opts.center.lat, opts.center.lng], opts.zoom);
-                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '© OpenStreetMap contributors'
-                    }).addTo(leafletMap);
-                    this.panTo = (pos) => leafletMap.panTo([pos.lat, pos.lng]);
-                    this.setZoom = (z) => leafletMap.setZoom(z);
-                    this.fitBounds = (bounds, pad) => {
-                        if (bounds._points && bounds._points.length > 0) {
-                            leafletMap.fitBounds(bounds._points.map(p => [p.lat, p.lng]), { padding: [pad || 50, pad || 50] });
-                        }
-                    };
-                    return this;
-                },
-                Marker: function(opts) {
-                    const color = opts.icon ? opts.icon.fillColor : '#e53935';
-                    const size = opts.icon ? opts.icon.scale * 2 : 16;
-                    const icon = L.divIcon({
-                        className: '',
-                        html: `<div style="width:${size}px;height:${size}px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3)"></div>`,
-                        iconSize: [size, size],
-                        iconAnchor: [size/2, size/2]
-                    });
-                    const marker = L.marker([opts.position.lat, opts.position.lng], { icon, title: opts.title });
-                    if (opts.map) marker.addTo(leafletMap);
-                    this.setMap = (m) => { if (m) marker.addTo(leafletMap); else leafletMap.removeLayer(marker); };
-                    this.addListener = (evt, fn) => {
-                        if (evt === 'click') marker.on('click', fn);
-                    };
-                    this._marker = marker;
-                    return this;
-                },
-                InfoWindow: function(opts) {
-                    this.open = (m, marker) => { if (marker._marker) marker._marker.bindPopup(opts.content).openPopup(); };
-                    return this;
-                },
-                Polyline: function(opts) {
-                    const line = L.polyline(opts.path.map(p => [p.lat, p.lng]), {
-                        color: opts.strokeColor, opacity: opts.strokeOpacity, weight: opts.strokeWeight
-                    });
-                    if (opts.map) line.addTo(leafletMap);
-                    this.setMap = (m) => { if (m) line.addTo(leafletMap); else leafletMap.removeLayer(line); };
-                    return this;
-                },
-                LatLngBounds: function() {
-                    this._points = [];
-                    this.extend = (p) => { this._points.push(p); };
-                    return this;
-                }
-            };
-        }
-    </script>
+      if (!res.ok) {
+        var msg = (res.data && res.data.error) ? res.data.error : 'Upload failed (HTTP ' + res.status + ')';
+        result.innerHTML = '<div class="result-card error">Error: ' + esc(msg) + '</div>';
+        return;
+      }
+
+      renderUploadResult(res.data);
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+      result.innerHTML = '<div class="result-card error">Network error: ' + esc(err.message) + '</div>';
+    });
+}
+
+function renderUploadResult(data) {
+  var result = document.getElementById('upload-result');
+  var html = '<div class="result-card success">';
+  html += '<div style="font-weight:700;margin-bottom:8px">File uploaded successfully</div>';
+  html += '<div class="stat-row">';
+  html += statBox(data.totalRows, 'Total Rows');
+  html += statBox(data.validCount, 'Valid');
+  html += statBox(data.skippedCount, 'Skipped');
+  html += statBox(data.outOfRangeCount, 'Out-of-Range');
+  html += '</div>';
+
+  if (data.datesFound && data.datesFound.length) {
+    html += '<div style="font-size:.78rem;font-weight:600;margin-bottom:4px;margin-top:4px">Dates found:</div>';
+    html += '<div class="date-chips">';
+    data.datesFound.forEach(function(d) {
+      html += '<button class="date-chip" onclick="selectDate(\'' + esc(d) + '\')">' + esc(d) + '</button>';
+    });
+    html += '</div>';
+  }
+
+  if (data.warnings && data.warnings.length) {
+    html += '<div class="warn-section">';
+    html += '<div class="collapsible-header" onclick="toggleCollapsible(this)">';
+    html += data.warnings.length + ' warning(s) <span class="arrow">v</span></div>';
+    html += '<div class="collapsible-body">';
+    data.warnings.forEach(function(w) { html += '<div class="warn-item">' + esc(w) + '</div>'; });
+    html += '</div></div>';
+  }
+
+  if (data.errors && data.errors.length) {
+    html += '<div class="err-section">';
+    html += '<div class="collapsible-header" onclick="toggleCollapsible(this)">';
+    html += data.errors.length + ' row error(s) <span class="arrow">v</span></div>';
+    html += '<div class="collapsible-body">';
+    data.errors.forEach(function(e) { html += '<div class="err-item">' + esc(e) + '</div>'; });
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  result.innerHTML = html;
+
+  populateDateSelector(data.datesFound || []);
+  if (data.primaryDate) selectDate(data.primaryDate);
+}
+
+function statBox(val, lbl) {
+  return '<div class="stat"><div class="val">' + val + '</div><div class="lbl">' + lbl + '</div></div>';
+}
+
+function sb(val, lbl) {
+  return '<div class="stat-box"><div class="val">' + val + '</div><div class="lbl">' + lbl + '</div></div>';
+}
+
+function toggleCollapsible(h) {
+  h.classList.toggle('open');
+  h.nextElementSibling.classList.toggle('open');
+}
+
+// ── DATE SELECTOR ─────────────────────────────────────────────────────────────
+function populateDateSelector(dates) {
+  var sel = document.getElementById('date-select');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">-- Select date --</option>';
+  dates.forEach(function(d) {
+    var o = document.createElement('option');
+    o.value = d;
+    o.textContent = d;
+    if (d === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function selectDate(date) {
+  var sel = document.getElementById('date-select');
+  var found = false;
+  for (var i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].value === date) { found = true; break; }
+  }
+  if (!found) {
+    var o = document.createElement('option');
+    o.value = date;
+    o.textContent = date;
+    sel.appendChild(o);
+  }
+  sel.value = date;
+  onDateChange();
+}
+
+function onDateChange() {
+  var date = document.getElementById('date-select').value;
+  if (!date) return;
+  allocationFinalized = false;
+  document.getElementById('finalized-banner').style.display = 'none';
+  document.getElementById('undo-btn').disabled = true;
+  document.getElementById('finalize-btn').disabled = true;
+  clearAllocationUI();
+  loadAttendance(date);
+}
+
+// ── ATTENDANCE ────────────────────────────────────────────────────────────────
+function loadAttendance(date) {
+  var list = document.getElementById('attendance-list');
+  list.innerHTML = '<div class="loading-text">Loading attendance...</div>';
+  fetch('/api/attendance/' + encodeURIComponent(date))
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(data) { renderAttendance(data, date); })
+    .catch(function(e) {
+      list.innerHTML = '<div class="loading-text" style="color:#c62828">Failed: ' + esc(e.message) + '</div>';
+    });
+}
+
+function renderAttendance(attendees, date) {
+  var list = document.getElementById('attendance-list');
+  presentSrNames = attendees.filter(function(a) { return a.present; }).map(function(a) { return a.srName; });
+  updatePresentBadge(attendees);
+
+  if (!attendees.length) {
+    list.innerHTML = '<div class="empty-text">No SRs registered</div>';
+    return;
+  }
+
+  var html = '';
+  attendees.forEach(function(a) {
+    var checked = a.present ? 'checked' : '';
+    var disabled = allocationFinalized ? 'disabled' : '';
+    html += '<div class="sr-attendance-item">';
+    html += '<span>' + esc(a.srName) + '</span>';
+    html += '<label class="toggle-switch">';
+    html += '<input type="checkbox" ' + checked + ' ' + disabled + ' data-sr="' + esc(a.srName) + '" onchange="toggleAttendance(this)">';
+    html += '<span class="toggle-slider"></span></label></div>';
+  });
+  list.innerHTML = html;
+}
+
+function updatePresentBadge(attendees) {
+  var n = attendees.filter(function(a) { return a.present; }).length;
+  document.getElementById('present-count-badge').textContent = n + ' / ' + attendees.length + ' present';
+}
+
+function toggleAttendance(checkbox) {
+  var srName = checkbox.getAttribute('data-sr');
+  var present = checkbox.checked;
+  var date = document.getElementById('date-select').value;
+  fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(srName) + '?present=' + present, { method: 'PUT' })
+    .then(function() {
+      if (present) {
+        if (presentSrNames.indexOf(srName) === -1) presentSrNames.push(srName);
+      } else {
+        presentSrNames = presentSrNames.filter(function(n) { return n !== srName; });
+      }
+      var checked = document.querySelectorAll('#attendance-list input:checked').length;
+      var total = document.querySelectorAll('#attendance-list input').length;
+      document.getElementById('present-count-badge').textContent = checked + ' / ' + total + ' present';
+    })
+    .catch(function(e) { showAllocError('Attendance update failed: ' + e.message); });
+}
+
+// ── ALLOCATION ────────────────────────────────────────────────────────────────
+function runAllocation() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Please select a date first.'); return; }
+
+  var btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  hideAllocError();
+  clearAllocationUI();
+
+  fetch('/api/allocate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date: date })
+  })
+  .then(function(r) {
+    return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; });
+  })
+  .then(function(res) {
+    btn.disabled = false;
+    btn.textContent = 'Run Allocation';
+    if (!res.ok) {
+      var msg = (res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')';
+      showAllocError(msg);
+      return;
+    }
+    allocationFinalized = false;
+    document.getElementById('undo-btn').disabled = false;
+    document.getElementById('finalize-btn').disabled = false;
+    document.getElementById('finalized-banner').style.display = 'none';
+    renderSummary(res.data);
+    renderSrList(res.data.srSummaries);
+    renderAllSrsOnMap(res.data.srSummaries, date);
+  })
+  .catch(function(e) {
+    btn.disabled = false;
+    btn.textContent = 'Run Allocation';
+    showAllocError('Network error: ' + e.message);
+  });
+}
+
+function renderSummary(s) {
+  document.getElementById('summary-panel').classList.remove('hidden');
+  var unallocStyle = (s.unallocatedShipments > 0) ? 'border-color:#ef9a9a' : '';
+  var unallocValStyle = (s.unallocatedShipments > 0) ? 'color:#c62828' : '';
+  document.getElementById('summary-stats').innerHTML =
+    sb(s.totalShipments, 'Total Shipments') +
+    sb(s.allocatedShipments != null ? s.allocatedShipments : s.totalShipments, 'Allocated') +
+    '<div class="stat-box" style="' + unallocStyle + '"><div class="val" style="' + unallocValStyle + '">' + (s.unallocatedShipments || 0) + '</div><div class="lbl">Unallocated</div></div>' +
+    sb(s.totalSrs, 'SRs Active') +
+    sb(s.srCapacity || '-', 'Capacity/SR') +
+    sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR') +
+    sb(s.fairnessVariance !== undefined ? s.fairnessVariance.toFixed(3) : '-', 'Fairness Var');
+}
+
+// ── SR LIST ───────────────────────────────────────────────────────────────────
+function renderSrList(srSummaries) {
+  document.getElementById('sr-list-panel').classList.remove('hidden');
+  var list = document.getElementById('sr-list');
+  var legendItems = document.getElementById('legend-items');
+  legendItems.innerHTML = '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
+
+  var html = '';
+  srSummaries.forEach(function(sr, i) {
+    var color = SR_COLORS[i % SR_COLORS.length];
+    legendItems.innerHTML += '<div class="legend-item"><div class="legend-dot" style="background:' + color + '"></div>' + esc(sr.srName) + ' (' + sr.shipmentCount + ')</div>';
+    var pincodes = sr.pincodesCovered ? sr.pincodesCovered.slice(0, 4).join(', ') + (sr.pincodesCovered.length > 4 ? '...' : '') : '';
+    var dist = sr.estimatedDistanceKm ? sr.estimatedDistanceKm.toFixed(1) + ' km' : '';
+    html += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
+    html += '<div class="sr-dot" style="background:' + color + '"></div>';
+    html += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
+    html += '<div class="sr-item-sub">' + esc(pincodes) + (dist ? ' - ' + dist : '') + '</div></div>';
+    html += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
+  });
+  list.innerHTML = html;
+}
+
+// ── MAP RENDERING ─────────────────────────────────────────────────────────────
+function renderAllSrsOnMap(srSummaries, date) {
+  clearMapLayers();
+  var i = 0;
+  function renderNext() {
+    if (i >= srSummaries.length) return;
+    var sr = srSummaries[i];
+    var color = SR_COLORS[i % SR_COLORS.length];
+    var idx = i;
+    i++;
+    fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(route) {
+        if (!route) { renderNext(); return; }
+        fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName) + '/polyline')
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(poly) {
+            addSrToMap(sr.srName, route, color, idx, poly, date);
+            renderNext();
+          })
+          .catch(function() {
+            addSrToMap(sr.srName, route, color, idx, null, date);
+            renderNext();
+          });
+      })
+      .catch(function() { renderNext(); });
+  }
+  renderNext();
+}
+
+function addSrToMap(srName, route, color, index, polylineCoords, date) {
+  if (!route || !route.stops || !route.stops.length) return;
+  var markers = [];
+  var stops = route.stops.slice().sort(function(a, b) { return a.sequence - b.sequence; });
+
+  stops.forEach(function(stop) {
+    var isOverride = stop.isOverride === true;
+    var isOor = stop.outOfRange === true;
+    var border = isOverride ? 'border:2px dashed #fff' : 'border:2px solid #fff';
+    var outline = isOor ? 'outline:2px solid #e53935;outline-offset:2px;' : '';
+    var icon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;background:' + color + ';' + border + ';' + outline + 'border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
+    var marker = L.marker([stop.latitude, stop.longitude], { icon: icon, title: srName + ' #' + stop.sequence });
+    marker.bindPopup(buildPopup(srName, stop, color, date), { maxWidth: 240 });
+    marker.addTo(map);
+    markers.push(marker);
+  });
+
+  var polyline;
+  if (polylineCoords && polylineCoords.length > 1) {
+    polyline = L.polyline(
+      polylineCoords.map(function(p) { return [p[0], p[1]]; }),
+      { color: color, weight: 3, opacity: 0.8 }
+    ).addTo(map);
+  } else {
+    var path = [[HUB_LAT, HUB_LNG]];
+    stops.forEach(function(s) { path.push([s.latitude, s.longitude]); });
+    path.push([HUB_LAT, HUB_LNG]);
+    polyline = L.polyline(path, { color: color, weight: 3, opacity: 0.75, dashArray: '6,4' }).addTo(map);
+  }
+
+  srLayers[srName] = { markers: markers, polyline: polyline, color: color, index: index };
+}
+
+function buildPopup(srName, stop, color, date) {
+  var oor = stop.outOfRange ? '<div class="popup-oor">Out-of-range</div>' : '';
+  var reassign = !allocationFinalized
+    ? '<button class="popup-reassign" onclick="openReassignModal(\'' + esc(stop.shippingId) + '\',\'' + esc(srName) + '\')">Reassign</button>'
+    : '';
+  return '<div>' +
+    '<div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + '</div>' + oor +
+    '<div class="popup-row"><span class="popup-label">ID</span><span class="popup-val">' + esc(stop.shippingId) + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Pincode</span><span class="popup-val">' + esc(stop.dropPincode) + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Type</span><span class="popup-val">' + esc(stop.orderType) + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Weight</span><span class="popup-val">' + stop.phyWeight + ' kg' + (stop.isHeavy ? ' (Heavy)' : '') + '</span></div>' +
+    '<div class="popup-row"><span class="popup-label">Flow</span><span class="popup-val">' + esc(stop.shipmentFlow) + '</span></div>' +
+    (stop.isOverride ? '<div class="popup-row"><span class="popup-label">Override</span><span class="popup-val" style="color:#e65100">Yes</span></div>' : '') +
+    reassign + '</div>';
+}
+
+// ── SR SELECTION ──────────────────────────────────────────────────────────────
+function selectSr(srName, index) {
+  currentSrName = srName;
+  currentSrIndex = index;
+  document.querySelectorAll('.sr-item').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-sr') === srName);
+  });
+  var layer = srLayers[srName];
+  if (layer && layer.markers.length) {
+    var group = L.featureGroup(layer.markers);
+    map.fitBounds(group.getBounds().pad(0.15));
+  }
+  var date = document.getElementById('date-select').value;
+  document.getElementById('route-panel').classList.remove('hidden');
+  document.getElementById('route-panel-title').textContent = 'Route: ' + srName;
+  document.getElementById('route-stats').innerHTML = '<div class="loading-text">Loading...</div>';
+  document.getElementById('stop-list').innerHTML = '';
+
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(srName))
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(route) { renderRouteDetails(route, SR_COLORS[index % SR_COLORS.length]); })
+    .catch(function(e) {
+      document.getElementById('route-stats').innerHTML = '<div class="loading-text" style="color:#c62828">Error: ' + esc(e.message) + '</div>';
+    });
+}
+
+function renderRouteDetails(route, color) {
+  var stops = (route.stops || []).slice().sort(function(a, b) { return a.sequence - b.sequence; });
+  var pincodes = {};
+  stops.forEach(function(s) { if (s.dropPincode) pincodes[s.dropPincode] = 1; });
+  var overrides = stops.filter(function(s) { return s.isOverride; }).length;
+
+  document.getElementById('route-stats').innerHTML =
+    sb(route.totalShipments, 'Stops') +
+    sb(route.estimatedDistanceKm ? route.estimatedDistanceKm.toFixed(1) : '-', 'km') +
+    sb(Object.keys(pincodes).length, 'Pincodes') +
+    sb(overrides, 'Overrides');
+
+  var html = '';
+  stops.forEach(function(stop) {
+    var tags = '';
+    if (stop.isOverride) tags += '<span class="stop-tag override">Override</span>';
+    if (stop.outOfRange) tags += '<span class="stop-tag oor">Out-of-range</span>';
+    if (stop.isHeavy) tags += '<span class="stop-tag heavy">Heavy</span>';
+    tags += '<span class="stop-tag">' + esc(stop.shipmentFlow) + '</span>';
+    tags += '<span class="stop-tag">' + stop.phyWeight + 'kg</span>';
+    html += '<div class="stop-item" onclick="map.setView([' + stop.latitude + ',' + stop.longitude + '],17)">';
+    html += '<div class="stop-seq" style="background:' + color + '">' + stop.sequence + '</div>';
+    html += '<div class="stop-info"><div class="stop-pincode">' + esc(stop.dropPincode) + '</div>';
+    html += '<div class="stop-id">' + esc(stop.shippingId) + '</div>';
+    html += '<div class="stop-meta">' + tags + '</div></div></div>';
+  });
+  document.getElementById('stop-list').innerHTML = html;
+}
+
+// ── OVERRIDE ──────────────────────────────────────────────────────────────────
+function openReassignModal(shippingId, currentSr) {
+  if (allocationFinalized) return;
+  pendingReassign = { shippingId: shippingId, currentSr: currentSr };
+  document.getElementById('modal-info').innerHTML =
+    'Shipment: <strong>' + esc(shippingId) + '</strong><br>Current SR: <strong>' + esc(currentSr) + '</strong>';
+
+  var radioList = document.getElementById('sr-radio-list');
+  var targets = presentSrNames.filter(function(n) { return n !== currentSr; });
+  if (!targets.length) {
+    radioList.innerHTML = '<div class="empty-text">No other present SRs available</div>';
+  } else {
+    radioList.innerHTML = targets.map(function(sr) {
+      return '<label class="sr-radio-item"><input type="radio" name="targetSr" value="' + esc(sr) + '"> ' + esc(sr) + '</label>';
+    }).join('');
+  }
+  document.getElementById('override-modal').showModal();
+}
+
+function confirmOverride() {
+  var selected = document.querySelector('input[name="targetSr"]:checked');
+  if (!selected) { alert('Please select a target SR.'); return; }
+  var date = document.getElementById('date-select').value;
+  var shippingId = pendingReassign.shippingId;
+  document.getElementById('override-modal').close();
+
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/override', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shippingId: shippingId, targetSrName: selected.value })
+  })
+  .then(function(r) {
+    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+  })
+  .then(function(res) {
+    if (!res.ok) { showAllocError((res.data.message || 'Override failed')); return; }
+    refreshAllocation();
+  })
+  .catch(function(e) { showAllocError('Override error: ' + e.message); });
+}
+
+function undoOverride() {
+  var date = document.getElementById('date-select').value;
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/override', { method: 'DELETE' })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Undo failed'); });
+      refreshAllocation();
+    })
+    .catch(function(e) { showAllocError('Undo error: ' + e.message); });
+}
+
+function finalizeAllocation() {
+  if (!confirm('Finalize allocation? No further overrides will be allowed.')) return;
+  var date = document.getElementById('date-select').value;
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/finalize', { method: 'POST' })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Finalize failed'); });
+      allocationFinalized = true;
+      document.getElementById('finalized-banner').style.display = 'block';
+      document.getElementById('undo-btn').disabled = true;
+      document.getElementById('finalize-btn').disabled = true;
+      document.querySelectorAll('#attendance-list input').forEach(function(el) { el.disabled = true; });
+      refreshAllocation();
+    })
+    .catch(function(e) { showAllocError('Finalize error: ' + e.message); });
+}
+
+function refreshAllocation() {
+  var date = document.getElementById('date-select').value;
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/summary')
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(summary) {
+      clearAllocationUI();
+      renderSummary(summary);
+      renderSrList(summary.srSummaries);
+      renderAllSrsOnMap(summary.srSummaries, date);
+      if (currentSrName) {
+        var idx = summary.srSummaries.findIndex(function(s) { return s.srName === currentSrName; });
+        if (idx >= 0) selectSr(currentSrName, idx);
+      }
+    })
+    .catch(function(e) { console.warn('Refresh error', e); });
+}
+
+// ── UTILITIES ─────────────────────────────────────────────────────────────────
+function clearMapLayers() {
+  Object.keys(srLayers).forEach(function(srName) {
+    var layer = srLayers[srName];
+    layer.markers.forEach(function(m) { map.removeLayer(m); });
+    if (layer.polyline) map.removeLayer(layer.polyline);
+  });
+  srLayers = {};
+}
+
+function clearAllocationUI() {
+  clearMapLayers();
+  document.getElementById('summary-panel').classList.add('hidden');
+  document.getElementById('sr-list-panel').classList.add('hidden');
+  document.getElementById('route-panel').classList.add('hidden');
+  document.getElementById('legend-items').innerHTML =
+    '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+window.addEventListener('load', function() {
+  initMap();
+  initUpload();
+
+  document.getElementById('run-btn').addEventListener('click', runAllocation);
+  document.getElementById('undo-btn').addEventListener('click', undoOverride);
+  document.getElementById('finalize-btn').addEventListener('click', finalizeAllocation);
+  document.getElementById('date-select').addEventListener('change', onDateChange);
+  document.getElementById('modal-cancel-btn').addEventListener('click', function() {
+    document.getElementById('override-modal').close();
+  });
+  document.getElementById('modal-confirm-btn').addEventListener('click', confirmOverride);
+
+  fetch('/api/csv/dates')
+    .then(function(r) { return r.json(); })
+    .then(function(dates) { if (dates.length) populateDateSelector(dates); })
+    .catch(function() {});
+});
+/*]]>*/
+</script>
 </body>
 </html>

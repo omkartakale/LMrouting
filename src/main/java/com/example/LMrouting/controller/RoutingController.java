@@ -1,75 +1,42 @@
 package com.example.LMrouting.controller;
 
-import com.example.LMrouting.dto.*;
-import com.example.LMrouting.repository.ShipmentRepository;
 import com.example.LMrouting.service.GoogleMapsService;
-import com.example.LMrouting.service.RoutingService;
+import com.example.LMrouting.service.OpenRouteService;
+import com.example.LMrouting.store.InMemoryStore;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
+/**
+ * Legacy routing controller — kept for backward compatibility.
+ * New allocation endpoints are in AllocationController.
+ */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class RoutingController {
 
-    private final RoutingService routingService;
-    private final ShipmentRepository shipmentRepository;
+    private final InMemoryStore store;
     private final GoogleMapsService googleMapsService;
+    private final OpenRouteService openRouteService;
 
-    /**
-     * Run routing algorithm for a given date and SR count.
-     * POST /api/route?date=24-Mar-26&srCount=10
-     */
-    @PostMapping("/route")
-    public RoutingSummary runRouting(
-            @RequestParam(defaultValue = "24-Mar-26") String date,
-            @RequestParam(defaultValue = "10") int srCount) {
-        return routingService.runRouting(date, srCount);
-    }
-
-    /**
-     * Get optimized route for a specific SR.
-     * GET /api/route/{srName}
-     */
-    @GetMapping("/route/{srName}")
-    public RouteResponse getRoute(@PathVariable String srName) {
-        return routingService.getRouteForSR(srName);
-    }
-
-    /**
-     * Get all available dates.
-     */
     @GetMapping("/dates")
     public List<String> getDates() {
-        return shipmentRepository.findDistinctAllocationDates();
+        return store.findAllDates();
     }
 
-    /**
-     * Get all assigned SRs.
-     */
-    @GetMapping("/srs")
-    public List<String> getSRs() {
-        return shipmentRepository.findDistinctAssignedSrs();
-    }
-
-    /**
-     * Get pincodes for a date.
-     */
-    @GetMapping("/pincodes")
-    public List<String> getPincodes(@RequestParam(defaultValue = "24-Mar-26") String date) {
-        return shipmentRepository.findDistinctPincodesByDate(date);
-    }
-
-    /**
-     * Check if Google Maps API is configured.
-     */
     @GetMapping("/config")
     public Map<String, Object> getConfig() {
         Map<String, Object> config = new HashMap<>();
         config.put("googleMapsConfigured", googleMapsService.isApiKeyConfigured());
-        config.put("totalShipments", shipmentRepository.count());
+        config.put("orsConfigured", openRouteService.isConfigured());
+        config.put("routingMode", openRouteService.isConfigured() ? "OpenRouteService (real roads)" :
+                googleMapsService.isApiKeyConfigured() ? "Google Maps (real roads)" :
+                "Nearest-neighbor (straight lines)");
+        long total = store.findAllDates().stream()
+                .mapToLong(d -> store.findShipmentsByDate(d).size()).sum();
+        config.put("totalShipments", total);
         return config;
     }
 }
