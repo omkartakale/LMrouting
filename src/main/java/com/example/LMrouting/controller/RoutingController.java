@@ -30,6 +30,9 @@ public class RoutingController {
     @Value("${hub.longitude:73.8884305}")
     private double hubLng;
 
+    @Value("${google.maps.api.key:}")
+    private String googleMapsApiKey;
+
     @GetMapping("/dates")
     public List<String> getDates() {
         return store.findAllDates();
@@ -67,6 +70,11 @@ public class RoutingController {
         long total = store.findAllDates().stream()
                 .mapToLong(d -> store.findShipmentsByDate(d).size()).sum();
         config.put("totalShipments", total);
+
+        // Expose Google Maps API key for frontend map tile rendering
+        if (googleMapsService.isApiKeyConfigured()) {
+            config.put("googleMapsApiKey", googleMapsApiKey);
+        }
         return config;
     }
 }

@@ -6,6 +6,21 @@
   <title>Shipment Allocation Optimizer v3</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Google Maps API key — loaded from /api/config at runtime
+    var GMAP_API_KEY = '';
+    function loadGoogleMapsScript(key) {
+      if (document.getElementById('gmap-script')) return;
+      GMAP_API_KEY = key;
+      var s = document.createElement('script');
+      s.id = 'gmap-script';
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + key + '&callback=onGoogleMapsReady';
+      s.async = true; s.defer = true;
+      document.head.appendChild(s);
+    }
+    var gmapReady = false;
+    function onGoogleMapsReady() { gmapReady = true; }
+  </script>
   <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f0f2f5}
@@ -112,11 +127,14 @@ input:checked+.toggle-slider:before{transform:translateX(17px)}
 .stop-tag.override{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
 .stop-tag.oor{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
 .stop-tag.heavy{background:#f3e5f5;color:#6a1b9a}
-#map-legend{position:absolute;bottom:20px;left:10px;z-index:1000;background:rgba(255,255,255,.96);border:1px solid #dee2e6;border-radius:8px;padding:9px 11px;font-size:.73rem;max-height:240px;overflow-y:auto;box-shadow:0 2px 8px rgba(0,0,0,.12)}
-#map-legend h4{font-size:.76rem;font-weight:700;margin-bottom:5px;color:#343a40}
-.legend-item{display:flex;align-items:center;gap:5px;padding:2px 0}
-.legend-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
-.legend-line{width:22px;height:3px;flex-shrink:0;border-radius:2px}
+#map-legend{position:absolute;bottom:8px;left:8px;z-index:10001;background:rgba(255,255,255,.92);border:1px solid #ccc;border-radius:6px;padding:0;font-size:.65rem;max-width:150px;box-shadow:0 1px 4px rgba(0,0,0,.15);overflow:hidden}
+#map-legend.collapsed #legend-items{display:none}
+#map-legend h4{font-size:.68rem;font-weight:700;margin:0;padding:5px 8px;color:#343a40;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
+#map-legend h4 .legend-toggle{font-size:.6rem;opacity:.6}
+#legend-items{max-height:160px;overflow-y:auto;padding:0 8px 5px}
+.legend-item{display:flex;align-items:center;gap:4px;padding:1px 0;font-size:.63rem;line-height:1.3}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.legend-line{width:16px;height:2px;flex-shrink:0;border-radius:2px}
 .legend-line.dashed{background:repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px)}
 /* Comparison mode indicator */
 #compare-banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(106,27,154,.9);color:#fff;padding:5px 14px;border-radius:20px;font-size:.78rem;font-weight:600;display:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25)}
@@ -147,6 +165,14 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .map-fullscreen #map-container{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999}
 .map-fullscreen #header{display:none!important}
 .map-fullscreen #fullscreen-btn{top:10px;right:10px}
+/* LM Integration */
+.lm-sr-row{display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.78rem}
+.lm-sr-row:last-child{border-bottom:none}
+.lm-sr-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.lm-sr-name{font-weight:600;min-width:55px;flex-shrink:0}
+.lm-sr-count{font-size:.7rem;color:#6c757d;min-width:25px;flex-shrink:0}
+.lm-sr-input{flex:1;padding:3px 5px;border:1px solid #ced4da;border-radius:4px;font-size:.74rem;min-width:0}
+.lm-sr-status{width:16px;height:16px;flex-shrink:0;text-align:center;font-size:.7rem}
   </style>
 </head>
 <body>
@@ -242,14 +268,81 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="stop-list" id="stop-list"></div>
     </div>
 
+    <!-- LM Integration Panel -->
+    <div class="panel hidden" id="lm-panel">
+      <div class="panel-title">
+        Push to LM System
+        <span class="badge" id="lm-status-badge" style="background:#6c757d">Not Connected</span>
+      </div>
+
+      <!-- Token Status -->
+      <div style="display:flex;gap:5px;margin-bottom:8px;align-items:center">
+        <button class="btn btn-secondary" style="font-size:.72rem;padding:4px 8px" onclick="lmConnect()">🔑 Connect</button>
+        <span id="lm-token-info" style="font-size:.72rem;color:#6c757d">Click Connect to auth with Keycloak</span>
+      </div>
+
+      <!-- Pending / Allocated counts -->
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <div style="flex:1;background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:6px;text-align:center">
+          <div style="font-size:.72rem;color:#0d47a1;font-weight:600">Pending</div>
+          <div id="lm-pending-count" style="font-size:.9rem;font-weight:700;color:#1565c0">-</div>
+        </div>
+        <div style="flex:1;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:6px;text-align:center">
+          <div style="font-size:.72rem;color:#1b5e20;font-weight:600">Allocated</div>
+          <div id="lm-allocated-count" style="font-size:.9rem;font-weight:700;color:#2e7d32">-</div>
+        </div>
+        <button class="btn btn-secondary" style="font-size:.72rem;padding:4px 8px;align-self:center" onclick="lmFetchDashboard()">↻</button>
+      </div>
+
+      <!-- SR Mapping Table -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <span style="font-size:.78rem;font-weight:600;color:#343a40">Map Routes → LM Delivery Users</span>
+        <button class="btn btn-secondary" style="font-size:.68rem;padding:2px 6px" onclick="lmLoadDeliveryUsers()">Load SRs</button>
+      </div>
+      <div id="lm-sr-mapping" style="max-height:240px;overflow-y:auto;margin-bottom:8px">
+        <div class="empty-text">Run allocation first to see routes</div>
+      </div>
+
+      <!-- Options -->
+      <div style="display:flex;gap:8px;margin-bottom:8px;font-size:.76rem;align-items:center">
+        <label><input type="checkbox" id="lm-auto-confirm" checked> Auto-confirm (OFD)</label>
+        <label style="margin-left:auto">Delay:
+          <input type="number" id="lm-delay" value="200" min="50" max="2000" step="50" style="width:55px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.74rem"/>ms
+        </label>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn" id="lm-push-all-btn" disabled onclick="lmPushAll()" style="flex:1;background:#e65100;color:#fff;font-size:.78rem">
+          🚀 Push All Routes
+        </button>
+        <button class="btn btn-secondary" id="lm-confirm-all-btn" disabled onclick="lmConfirmAll()" style="flex:1;font-size:.78rem">
+          ✅ Confirm All
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div id="lm-progress" style="display:none;margin-top:8px">
+        <div style="font-size:.76rem;font-weight:600;color:#495057;margin-bottom:3px" id="lm-progress-text">Pushing...</div>
+        <div style="background:#e9ecef;border-radius:4px;height:6px;overflow:hidden">
+          <div id="lm-progress-bar" style="background:#1976d2;height:100%;width:0%;transition:width .3s"></div>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div id="lm-results" style="margin-top:8px"></div>
+    </div>
+
   </aside>
 
   <div id="map-container">
     <div id="map"></div>
+    <div id="gmap" style="display:none;width:100%;height:100%"></div>
     <button id="fullscreen-btn" onclick="toggleMapFullscreen()" title="Toggle fullscreen map" style="position:absolute;top:10px;left:50px;z-index:10000;background:#fff;color:#333;border:2px solid rgba(0,0,0,.2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600;box-shadow:none;line-height:1.4">⛶</button>
+    <button id="map-toggle-btn" onclick="toggleMapProvider()" title="Switch map provider" style="position:absolute;top:10px;left:90px;z-index:10000;background:#fff;color:#333;border:2px solid rgba(0,0,0,.2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.72rem;font-weight:600;box-shadow:none;line-height:1.4">🗺 Google</button>
     <div id="compare-banner">&#x1F50D; Comparison Mode: OSM (solid) vs Google Maps (dashed)</div>
     <div id="map-legend">
-      <h4>&#x1F5FA;&#xFE0F; Legend</h4>
+      <h4 onclick="this.parentElement.classList.toggle('collapsed')">Legend <span class="legend-toggle">▼</span></h4>
       <div id="legend-items"></div>
     </div>
   </div>
@@ -294,6 +387,13 @@ var hubBoundaryLayer = null;
 var hubOriginalBoundaryLayer = null;
 var lastHubName = null;
 
+// Google Maps state
+var gmap = null;           // google.maps.Map instance
+var gmapMarkers = [];      // google.maps.Marker[]
+var gmapPolylines = [];    // google.maps.Polyline[]
+var gmapHubMarker = null;
+var activeMapProvider = 'leaflet'; // 'leaflet' or 'google'
+
 function esc(s) {
   if (s == null) return '';
   var d = document.createElement('div');
@@ -331,7 +431,152 @@ function toggleMapFullscreen() {
     btn.textContent = '⛶';
     btn.title = 'Toggle fullscreen map';
   }
-  setTimeout(function() { map.invalidateSize(); }, 200);
+  setTimeout(function() {
+    if (activeMapProvider === 'leaflet') map.invalidateSize();
+    else if (gmap) google.maps.event.trigger(gmap, 'resize');
+  }, 200);
+}
+
+function toggleMapProvider() {
+  var btn = document.getElementById('map-toggle-btn');
+  if (activeMapProvider === 'leaflet') {
+    // Switch to Google Maps
+    if (!gmapReady) {
+      showAllocError('Google Maps is still loading. Try again in a moment.');
+      return;
+    }
+    activeMapProvider = 'google';
+    document.getElementById('map').style.display = 'none';
+    document.getElementById('gmap').style.display = 'block';
+    btn.textContent = '🗺 Leaflet';
+    btn.title = 'Switch to Leaflet/OSM';
+    initGoogleMap();
+    syncToGoogleMap();
+  } else {
+    // Switch to Leaflet
+    activeMapProvider = 'leaflet';
+    document.getElementById('gmap').style.display = 'none';
+    document.getElementById('map').style.display = 'block';
+    btn.textContent = '🗺 Google';
+    btn.title = 'Switch to Google Maps';
+    setTimeout(function() { map.invalidateSize(); }, 100);
+  }
+}
+
+function initGoogleMap() {
+  if (gmap) {
+    // Already initialized, just recenter
+    gmap.setCenter({ lat: HUB_LAT, lng: HUB_LNG });
+    google.maps.event.trigger(gmap, 'resize');
+    return;
+  }
+  gmap = new google.maps.Map(document.getElementById('gmap'), {
+    center: { lat: HUB_LAT, lng: HUB_LNG },
+    zoom: 13,
+    mapTypeId: 'roadmap',
+    mapTypeControl: true,
+    mapTypeControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT },
+    streetViewControl: false,
+    fullscreenControl: false
+  });
+  // Hub marker
+  gmapHubMarker = new google.maps.Marker({
+    position: { lat: HUB_LAT, lng: HUB_LNG },
+    map: gmap,
+    title: 'Hub',
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 10,
+      fillColor: '#e53935',
+      fillOpacity: 1,
+      strokeColor: '#fff',
+      strokeWeight: 3
+    },
+    zIndex: 1000
+  });
+  var infoWindow = new google.maps.InfoWindow({ content: '<b>Hub</b>' });
+  gmapHubMarker.addListener('click', function() { infoWindow.open(gmap, gmapHubMarker); });
+}
+
+function syncToGoogleMap() {
+  if (!gmap) return;
+  // Clear existing Google markers and polylines
+  gmapMarkers.forEach(function(m) { m.setMap(null); });
+  gmapPolylines.forEach(function(p) { p.setMap(null); });
+  gmapMarkers = [];
+  gmapPolylines = [];
+
+  // Re-add all SR markers and polylines from srLayers
+  Object.keys(srLayers).forEach(function(srName) {
+    var layer = srLayers[srName];
+    var color = layer.color || '#1976d2';
+
+    // Add markers
+    if (layer.markers) {
+      layer.markers.forEach(function(leafletMarker) {
+        var ll = leafletMarker.getLatLng();
+        var gMarker = new google.maps.Marker({
+          position: { lat: ll.lat, lng: ll.lng },
+          map: gmap,
+          title: leafletMarker.options.title || srName,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: '#fff',
+            strokeWeight: 2
+          }
+        });
+        // Copy popup content
+        var popupContent = leafletMarker.getPopup() ? leafletMarker.getPopup().getContent() : '';
+        if (popupContent) {
+          var infoWindow = new google.maps.InfoWindow({ content: popupContent, maxWidth: 250 });
+          gMarker.addListener('click', function() { infoWindow.open(gmap, gMarker); });
+        }
+        gmapMarkers.push(gMarker);
+      });
+    }
+
+    // Add OSM polyline
+    if (layer.osmPolyline) {
+      var latlngs = layer.osmPolyline.getLatLngs();
+      var path = latlngs.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
+      var gPoly = new google.maps.Polyline({
+        path: path,
+        geodesic: true,
+        strokeColor: color,
+        strokeOpacity: 0.8,
+        strokeWeight: 3,
+        map: gmap
+      });
+      gmapPolylines.push(gPoly);
+    }
+
+    // Add Google polyline (dashed)
+    if (layer.googlePolyline) {
+      var latlngs2 = layer.googlePolyline.getLatLngs();
+      var path2 = latlngs2.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
+      var gPoly2 = new google.maps.Polyline({
+        path: path2,
+        geodesic: true,
+        strokeColor: '#1b8a3c',
+        strokeOpacity: 0.85,
+        strokeWeight: 4,
+        icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }],
+        map: gmap
+      });
+      gmapPolylines.push(gPoly2);
+    }
+  });
+
+  // Fit bounds
+  if (gmapMarkers.length > 0) {
+    var bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: HUB_LAT, lng: HUB_LNG });
+    gmapMarkers.forEach(function(m) { bounds.extend(m.getPosition()); });
+    gmap.fitBounds(bounds, 40);
+  }
 }
 
 function initMap() {
@@ -394,6 +639,15 @@ function loadConfig() {
       if (!googleMapsConfigured) {
         document.getElementById('run-google-btn').disabled = true;
         document.getElementById('run-google-btn').title = 'Google Maps API key not configured. Add it to application.properties.';
+      }
+
+      // Load Google Maps JS API for map tile rendering
+      if (cfg.googleMapsApiKey) {
+        loadGoogleMapsScript(cfg.googleMapsApiKey);
+      } else {
+        document.getElementById('map-toggle-btn').disabled = true;
+        document.getElementById('map-toggle-btn').title = 'Google Maps API key not configured';
+        document.getElementById('map-toggle-btn').style.opacity = '0.5';
       }
     })
     .catch(function() {
@@ -806,6 +1060,7 @@ function runAllocation(mode) {
     document.getElementById('summary-mode-badge').textContent = label;
     renderSummary(res.data);
     renderSrList(res.data.srSummaries);
+    lmShowPanel(res.data.srSummaries);
     renderAllSrsOnMap(res.data.srSummaries, date, mode);
     showAllocInfo('Allocation complete using ' + label + '. ' + (mode === 'osm' && googleMapsConfigured ? 'You can also run Google Maps allocation to compare.' : ''));
   })
@@ -925,7 +1180,11 @@ function renderAllSrsOnMap(srSummaries, date, mode) {
 
   var i = 0;
   function next() {
-    if (i >= srSummaries.length) return;
+    if (i >= srSummaries.length) {
+      // Sync to Google Map if active
+      if (activeMapProvider === 'google') syncToGoogleMap();
+      return;
+    }
     var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
     fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName))
       .then(function(r) { return r.ok ? r.json() : null; })
@@ -1176,7 +1435,7 @@ function refreshAllocation() {
       clearAllocationUI();
       renderSummary(summary);
       renderSrList(summary.srSummaries);
-      // Re-render using last known mode
+      lmShowPanel(summary.srSummaries);
       if (lastAllocationMode) renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode);
       if (currentSrName) {
         var idx = summary.srSummaries.findIndex(function(s) { return s.srName === currentSrName; });
@@ -1210,6 +1469,7 @@ function clearAllocationUI() {
   document.getElementById('summary-panel').classList.add('hidden');
   document.getElementById('sr-list-panel').classList.add('hidden');
   document.getElementById('route-panel').classList.add('hidden');
+  document.getElementById('lm-panel').classList.add('hidden');
   document.getElementById('compare-banner').style.display = 'none';
   document.getElementById('legend-items').innerHTML =
     '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
@@ -1217,6 +1477,303 @@ function clearAllocationUI() {
   if (hubBoundaryLayer && lastHubName) {
     updateBoundaryLegend(lastHubName, lastHubName, true);
   }
+}
+
+// ── LM INTEGRATION ────────────────────────────────────────────────────────────
+var lmSrMappings = {}; // { srName: { deliveryUserId, deliveryUserName, empType } }
+var lmLastSrSummaries = [];
+var lmDeliveryUsers = []; // fetched from LM API
+var lmConnected = false;
+
+function lmShowPanel(srSummaries) {
+  lmLastSrSummaries = srSummaries || [];
+  document.getElementById('lm-panel').classList.remove('hidden');
+  renderLmSrMapping(srSummaries);
+  document.getElementById('lm-push-all-btn').disabled = !lmConnected;
+}
+
+function lmConnect() {
+  var info = document.getElementById('lm-token-info');
+  var badge = document.getElementById('lm-status-badge');
+  info.textContent = 'Connecting to Keycloak...';
+  badge.textContent = 'Connecting...';
+  badge.style.background = '#fb8c00';
+
+  fetch('/api/lm/refresh-token', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        lmConnected = true;
+        badge.textContent = 'Connected';
+        badge.style.background = '#43a047';
+        info.textContent = 'Token OK — Hub ' + (data.hubId || 614);
+        document.getElementById('lm-push-all-btn').disabled = false;
+        // Auto-fetch dashboard and delivery users
+        lmFetchDashboard();
+        lmLoadDeliveryUsers();
+      } else {
+        badge.textContent = 'Auth Failed';
+        badge.style.background = '#e53935';
+        info.textContent = data.error || 'Failed';
+      }
+    })
+    .catch(function(e) {
+      badge.textContent = 'Error';
+      badge.style.background = '#e53935';
+      info.textContent = e.message;
+    });
+}
+
+function lmFetchDashboard() {
+  fetch('/api/lm/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.data) {
+        var pc = data.data.pendingCounts || {};
+        var ac = data.data.allocatedCounts || {};
+        document.getElementById('lm-pending-count').textContent = (pc.srCount || 0) + ' SR | ' + (pc.svcCount || 0) + ' SVC';
+        document.getElementById('lm-allocated-count').textContent = (ac.srCount || 0) + ' SR | ' + (ac.svcCount || 0) + ' SVC';
+      }
+    })
+    .catch(function() {});
+}
+
+function lmLoadDeliveryUsers() {
+  fetch('/api/lm/delivery-users', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      lmDeliveryUsers = data.users || [];
+      if (lmDeliveryUsers.length > 0) {
+        showAllocInfo('Loaded ' + lmDeliveryUsers.length + ' delivery users from LM');
+        // Re-render mapping with dropdowns
+        if (lmLastSrSummaries.length) renderLmSrMapping(lmLastSrSummaries);
+      }
+    })
+    .catch(function() {});
+}
+
+function renderLmSrMapping(srSummaries) {
+  var container = document.getElementById('lm-sr-mapping');
+  if (!srSummaries || !srSummaries.length) {
+    container.innerHTML = '<div class="empty-text">No routes to push</div>';
+    return;
+  }
+  var h = '';
+  srSummaries.forEach(function(sr, i) {
+    var color = SR_COLORS[i % SR_COLORS.length];
+    var saved = lmSrMappings[sr.srName] || {};
+    h += '<div class="lm-sr-row">';
+    h += '<div class="lm-sr-dot" style="background:' + color + '"></div>';
+    h += '<div class="lm-sr-name">' + esc(sr.srName) + '</div>';
+    h += '<div class="lm-sr-count">' + sr.shipmentCount + '</div>';
+
+    if (lmDeliveryUsers.length > 0) {
+      // Dropdown with real SRs
+      h += '<select class="lm-sr-input" data-sr="' + esc(sr.srName) + '" data-field="select" style="font-size:.72rem;padding:2px 3px">';
+      h += '<option value="">-- Select SR --</option>';
+      lmDeliveryUsers.forEach(function(u) {
+        var uid = String(u.userid || u.UserId || u.id || '');
+        var uname = (u.firstname || '') + ' ' + (u.lastname || '');
+        uname = uname.trim() || u.username || uid;
+        var emptype = u.emptype || 'ownsr';
+        var sel = (saved.deliveryUserId === uid) ? ' selected' : '';
+        h += '<option value="' + esc(uid) + '" data-name="' + esc(uname) + '" data-emp="' + esc(emptype) + '"' + sel + '>' + esc(uname) + ' (' + uid + ')</option>';
+      });
+      h += '</select>';
+    } else {
+      // Manual input fallback
+      h += '<input class="lm-sr-input" data-sr="' + esc(sr.srName) + '" data-field="userId" placeholder="User ID" value="' + esc(saved.deliveryUserId || '') + '" style="flex:0 0 60px"/>';
+      h += '<input class="lm-sr-input" data-sr="' + esc(sr.srName) + '" data-field="userName" placeholder="Name" value="' + esc(saved.deliveryUserName || '') + '"/>';
+    }
+    h += '<div class="lm-sr-status" id="lm-status-' + i + '">⏳</div>';
+    h += '</div>';
+  });
+  container.innerHTML = h;
+
+  // Bind change events
+  container.querySelectorAll('.lm-sr-input').forEach(function(el) {
+    el.addEventListener('change', function() {
+      var sr = el.getAttribute('data-sr');
+      var field = el.getAttribute('data-field');
+      if (!lmSrMappings[sr]) lmSrMappings[sr] = {};
+      if (field === 'select') {
+        var opt = el.options[el.selectedIndex];
+        lmSrMappings[sr].deliveryUserId = el.value;
+        lmSrMappings[sr].deliveryUserName = opt ? opt.getAttribute('data-name') || '' : '';
+        lmSrMappings[sr].empType = opt ? opt.getAttribute('data-emp') || 'ownsr' : 'ownsr';
+      } else if (field === 'userId') {
+        lmSrMappings[sr].deliveryUserId = el.value.trim();
+      } else if (field === 'userName') {
+        lmSrMappings[sr].deliveryUserName = el.value.trim();
+      }
+    });
+  });
+}
+
+function lmCollectMappings() {
+  document.querySelectorAll('#lm-sr-mapping .lm-sr-input').forEach(function(el) {
+    var sr = el.getAttribute('data-sr');
+    var field = el.getAttribute('data-field');
+    if (!lmSrMappings[sr]) lmSrMappings[sr] = {};
+    if (field === 'select') {
+      var opt = el.options[el.selectedIndex];
+      lmSrMappings[sr].deliveryUserId = el.value;
+      lmSrMappings[sr].deliveryUserName = opt ? opt.getAttribute('data-name') || '' : '';
+      lmSrMappings[sr].empType = opt ? opt.getAttribute('data-emp') || 'ownsr' : 'ownsr';
+    } else if (field === 'userId') {
+      lmSrMappings[sr].deliveryUserId = el.value.trim();
+    } else if (field === 'userName') {
+      lmSrMappings[sr].deliveryUserName = el.value.trim();
+    }
+  });
+  return lmSrMappings;
+}
+
+function lmPushAll() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Select a date first.'); return; }
+
+  var mappings = lmCollectMappings();
+  var srMappingsList = [];
+  var missing = [];
+
+  lmLastSrSummaries.forEach(function(sr) {
+    var m = mappings[sr.srName];
+    if (!m || !m.deliveryUserId) {
+      missing.push(sr.srName);
+    } else {
+      srMappingsList.push({
+        srName: sr.srName,
+        deliveryUserId: m.deliveryUserId,
+        deliveryUserName: m.deliveryUserName || m.deliveryUserId,
+        empType: m.empType || 'ownsr'
+      });
+    }
+  });
+
+  if (missing.length > 0) {
+    showAllocError('Missing SR mapping for: ' + missing.join(', '));
+    return;
+  }
+
+  var autoConfirm = document.getElementById('lm-auto-confirm').checked;
+
+  var btn = document.getElementById('lm-push-all-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Pushing...';
+
+  var progress = document.getElementById('lm-progress');
+  progress.style.display = 'block';
+  document.getElementById('lm-progress-text').textContent = 'Allocating shipments to LM system...';
+  document.getElementById('lm-progress-bar').style.width = '10%';
+  document.getElementById('lm-results').innerHTML = '';
+
+  fetch('/api/lm/push-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      date: date,
+      srMappings: srMappingsList,
+      autoConfirm: autoConfirm,
+      allocationType: 'Delivery',
+      tripType: 'Delivery'
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    btn.disabled = false;
+    btn.innerHTML = '🚀 Push All Routes';
+    document.getElementById('lm-progress-bar').style.width = '100%';
+    document.getElementById('lm-progress-text').textContent =
+      'Done! ' + (data.totalAllocated || 0) + ' allocated, ' + (data.totalFailed || 0) + ' failed' +
+      (autoConfirm ? ' (auto-confirmed)' : '');
+
+    // Update status icons
+    if (data.srResults) {
+      data.srResults.forEach(function(sr, i) {
+        var el = document.getElementById('lm-status-' + i);
+        if (el) {
+          if (sr.error) { el.textContent = '❌'; el.title = sr.error; }
+          else if (sr.failed > 0) { el.textContent = '⚠️'; el.title = sr.failed + ' failed'; }
+          else { el.textContent = '✅'; el.title = 'OK'; }
+        }
+      });
+    }
+
+    if (!autoConfirm) document.getElementById('lm-confirm-all-btn').disabled = false;
+
+    // Show results
+    var resHtml = '<div class="result-card ' + (data.totalFailed > 0 ? 'error' : 'success') + '">';
+    resHtml += '<div style="font-weight:700;margin-bottom:4px">Push Complete</div>';
+    resHtml += '<div class="stat-row">';
+    resHtml += statBox(data.totalAllocated || 0, 'Allocated');
+    resHtml += statBox(data.totalFailed || 0, 'Failed');
+    resHtml += statBox(data.totalSrs || 0, 'SRs');
+    resHtml += '</div>';
+    if (data.srResults) {
+      data.srResults.forEach(function(sr) {
+        var icon = sr.error ? '❌' : (sr.failed > 0 ? '⚠️' : '✅');
+        var confirm = sr.confirmResult ? ' | Trip: ' + (sr.confirmResult.trip ? sr.confirmResult.trip.tripid || 'created' : sr.confirmResult.message || '-') : '';
+        resHtml += '<div style="font-size:.74rem;padding:2px 0;border-bottom:1px solid #f1f3f5">' +
+          icon + ' <b>' + esc(sr.srName) + '</b> → ' + esc(sr.deliveryUserName || '') +
+          ': ' + (sr.allocated || 0) + '/' + (sr.shipmentCount || 0) + confirm + '</div>';
+      });
+    }
+    resHtml += '</div>';
+    document.getElementById('lm-results').innerHTML = resHtml;
+
+    // Refresh dashboard counts
+    lmFetchDashboard();
+  })
+  .catch(function(e) {
+    btn.disabled = false;
+    btn.innerHTML = '🚀 Push All Routes';
+    document.getElementById('lm-progress-text').textContent = 'Error: ' + e.message;
+    document.getElementById('lm-results').innerHTML = '<div class="result-card error">Network error: ' + esc(e.message) + '</div>';
+  });
+}
+
+function lmConfirmAll() {
+  var mappings = lmCollectMappings();
+  var btn = document.getElementById('lm-confirm-all-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Confirming...';
+
+  var promises = [];
+  lmLastSrSummaries.forEach(function(sr) {
+    var m = mappings[sr.srName];
+    if (!m || !m.deliveryUserId) return;
+    promises.push(
+      fetch('/api/lm/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deliveryUserId: m.deliveryUserId,
+          srName: m.deliveryUserName || sr.srName,
+          vehicleType: 'bike',
+          tripType: 'Delivery'
+        })
+      }).then(function(r) { return r.json(); })
+        .then(function(d) { d._srName = sr.srName; return d; })
+        .catch(function(e) { return { _srName: sr.srName, code: 500, message: e.message }; })
+    );
+  });
+
+  Promise.all(promises).then(function(results) {
+    btn.disabled = false;
+    btn.innerHTML = '✅ Confirm All';
+    var ok = results.filter(function(r) { return r.code === 200; }).length;
+    var resHtml = '<div class="result-card ' + (ok < results.length ? 'error' : 'success') + '" style="margin-top:6px">';
+    resHtml += '<div style="font-weight:700;margin-bottom:4px">Confirm Results</div>';
+    results.forEach(function(r) {
+      var icon = r.code === 200 ? '✅' : '❌';
+      var trip = r.trip ? ' (Trip #' + (r.trip.tripid || '-') + ')' : '';
+      resHtml += '<div style="font-size:.74rem;padding:2px 0">' + icon + ' ' + esc(r._srName) + ': ' + esc(r.message || 'OK') + trip + '</div>';
+    });
+    resHtml += '</div>';
+    document.getElementById('lm-results').innerHTML += resHtml;
+    lmFetchDashboard();
+  });
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────
