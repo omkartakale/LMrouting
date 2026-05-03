@@ -624,7 +624,9 @@ function runAllocation(mode) {
 function renderSummary(s) {
   document.getElementById('summary-panel').classList.remove('hidden');
   var us = s.unallocatedShipments || 0;
-  document.getElementById('summary-stats').innerHTML =
+
+  // ── Core allocation stats ──────────────────────────────────────────────────
+  var coreHtml =
     sb(s.totalShipments, 'Total') +
     sb(s.allocatedShipments != null ? s.allocatedShipments : s.totalShipments, 'Allocated') +
     '<div class="stat-box" style="' + (us > 0 ? 'border-color:#ef9a9a' : '') + '"><div class="val" style="' + (us > 0 ? 'color:#c62828' : '') + '">' + us + '</div><div class="lbl">Unallocated</div></div>' +
@@ -632,6 +634,56 @@ function renderSummary(s) {
     sb(s.srCapacity || '-', 'Cap/SR') +
     sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR') +
     sb(s.fairnessVariance !== undefined ? s.fairnessVariance.toFixed(3) : '-', 'Fairness Var');
+
+  // ── Earnings fairness panel (CEO view) ─────────────────────────────────────
+  var earningsHtml = '';
+  if (s.srSummaries && s.srSummaries.length > 0 &&
+      s.srSummaries[0].netEarnings !== undefined && s.srSummaries[0].netEarnings !== 0) {
+
+    // Find highest, lowest, mean
+    var nets = s.srSummaries.map(function(sr) { return { name: sr.srName, net: sr.netEarnings || 0 }; });
+    nets.sort(function(a, b) { return b.net - a.net; });
+    var highest = nets[0];
+    var lowest  = nets[nets.length - 1];
+    var mean    = s.meanNetEarnings !== undefined
+                    ? s.meanNetEarnings
+                    : nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
+    var range   = s.earningsRange !== undefined ? s.earningsRange : (highest.net - lowest.net);
+
+    earningsHtml =
+      '<div style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+      '<div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:7px">&#x1F4B0; Earnings Fairness (Net = Payout &minus; Fuel)</div>' +
+      '<div class="summary-stats" style="grid-template-columns:1fr 1fr 1fr">' +
+        earningsBox('&#x2B06; ' + esc(highest.name), '&#x20B9;' + highest.net.toFixed(2), 'Highest Earner', '#1b5e20', '#e8f5e9', '#a5d6a7') +
+        earningsBox('&#x2B07; ' + esc(lowest.name),  '&#x20B9;' + lowest.net.toFixed(2),  'Lowest Earner',  '#b71c1c', '#ffebee', '#ef9a9a') +
+        earningsBox('&#x2248; Mean', '&#x20B9;' + mean.toFixed(2), 'Avg Net Earnings', '#0d47a1', '#e3f2fd', '#90caf9') +
+      '</div>' +
+      '<div style="margin-top:7px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 10px;font-size:.78rem">' +
+        '<span style="font-weight:700;color:#e65100">Earnings Range: &#x20B9;' + range.toFixed(2) + '</span>' +
+        ' &nbsp;|&nbsp; Spread between highest and lowest earning SR' +
+      '</div>' +
+      '</div>';
+  }
+
+  document.getElementById('summary-stats').innerHTML = coreHtml;
+  // Append earnings section after the grid
+  var panel = document.getElementById('summary-panel');
+  var existing = panel.querySelector('.earnings-section');
+  if (existing) existing.remove();
+  if (earningsHtml) {
+    var div = document.createElement('div');
+    div.className = 'earnings-section';
+    div.innerHTML = earningsHtml;
+    panel.appendChild(div);
+  }
+}
+
+function earningsBox(title, value, label, textColor, bgColor, borderColor) {
+  return '<div class="stat-box" style="background:' + bgColor + ';border-color:' + borderColor + '">' +
+    '<div style="font-size:.68rem;font-weight:600;color:' + textColor + ';margin-bottom:2px">' + title + '</div>' +
+    '<div class="val" style="color:' + textColor + ';font-size:1rem">' + value + '</div>' +
+    '<div class="lbl">' + label + '</div>' +
+    '</div>';
 }
 
 // ── SR LIST ───────────────────────────────────────────────────────────────────
@@ -644,18 +696,24 @@ function renderSrList(srSummaries) {
     legendItems.innerHTML += '<div class="legend-item"><div class="legend-line" style="background:#555;height:3px;width:22px"></div><span style="color:#555">OSM route (solid)</span></div>';
   }
   if (hasGoogleAllocation || lastAllocationMode === 'google') {
-    legendItems.innerHTML += '<div class="legend-item"><div style="width:22px;height:3px;background:repeating-linear-gradient(90deg,#1b8a3c 0,#1b8a3c 4px,transparent 4px,transparent 8px)"></div><span style="color:#1b8a3c">Google Maps route (dashed)</span></div>';
+    legendItems.innerHTML += '<div class="legend-item"><div style="width:22px;height:3px;background:repeating-linear-gradient(90deg,#555 0,#555 4px,transparent 4px,transparent 8px)"></div><span style="color:#555">Google Maps route (dashed, same color)</span></div>';
   }
   var h = '';
   srSummaries.forEach(function(sr, i) {
     var color = SR_COLORS[i % SR_COLORS.length];
     legendItems.innerHTML += '<div class="legend-item"><div class="legend-dot" style="background:' + color + '"></div>' + esc(sr.srName) + ' (' + sr.shipmentCount + ')</div>';
-    var pins = sr.pincodesCovered ? sr.pincodesCovered.slice(0,4).join(', ') + (sr.pincodesCovered.length > 4 ? '...' : '') : '';
     var dist = sr.estimatedDistanceKm ? sr.estimatedDistanceKm.toFixed(1) + ' km' : '';
+
+    // Earnings sub-line
+    var earningsSub = '';
+    if (sr.netEarnings !== undefined && sr.netEarnings !== 0) {
+      earningsSub = ' &nbsp;|&nbsp; Net: <strong style="color:#1b5e20">&#x20B9;' + sr.netEarnings.toFixed(2) + '</strong>';
+    }
+
     h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
     h += '<div class="sr-dot" style="background:' + color + '"></div>';
     h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
-    h += '<div class="sr-item-sub">' + esc(pins) + (dist ? ' - ' + dist : '') + '</div></div>';
+    h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div></div>';
     h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
   });
   list.innerHTML = h;
@@ -674,8 +732,14 @@ function renderAllSrsOnMap(srSummaries, date, mode) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(route) {
         if (!route) { next(); return; }
+        // Initialise layer entry and store SR summary data for earnings display
+        if (!srLayers[sr.srName]) {
+          srLayers[sr.srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: idx, srData: sr };
+        } else {
+          srLayers[sr.srName].srData = sr; // refresh earnings data
+        }
         // Add markers if not already present
-        if (!srLayers[sr.srName] || !srLayers[sr.srName].markers.length) {
+        if (!srLayers[sr.srName].markers.length) {
           addMarkersForSr(sr.srName, route, color, idx, date);
         }
         // Fetch polyline for this mode
@@ -714,21 +778,26 @@ function addPolylineForSr(srName, polyCoords, color, mode) {
   if (mode === 'osm' && srLayers[srName].osmPolyline) { map.removeLayer(srLayers[srName].osmPolyline); srLayers[srName].osmPolyline = null; }
   if (mode === 'google' && srLayers[srName].googlePolyline) { map.removeLayer(srLayers[srName].googlePolyline); srLayers[srName].googlePolyline = null; }
 
+  // Both OSM and Google Maps use the SR's own color.
+  // OSM = solid line, Google Maps = dashed line (same color, different style).
+  var osmOpts    = { color: color, weight: 4, opacity: 0.85 };
+  var googleOpts = { color: color, weight: 4, opacity: 0.85, dashArray: '10,6' };
+  var fallbackOsmOpts    = { color: color, weight: 3, opacity: 0.6, dashArray: '4,3' };
+  var fallbackGoogleOpts = { color: color, weight: 3, opacity: 0.6, dashArray: '10,6' };
+
   var polyline;
   if (polyCoords && polyCoords.length > 1) {
-    var opts = mode === 'google'
-      ? { color: '#1b8a3c', weight: 4, opacity: 0.85, dashArray: '8,5' }
-      : { color: color, weight: 3, opacity: 0.8 };
+    var opts = mode === 'google' ? googleOpts : osmOpts;
     polyline = L.polyline(polyCoords.map(function(p) { return [p[0], p[1]]; }), opts).addTo(map);
   } else {
-    // Straight-line fallback
+    // Straight-line fallback using marker positions
     var stops = srLayers[srName].markers.map(function(m) { return m.getLatLng(); });
     if (stops.length) {
-      var path = [[HUB_LAT, HUB_LNG]].concat(stops.map(function(ll) { return [ll.lat, ll.lng]; })).concat([[HUB_LAT, HUB_LNG]]);
-      var opts2 = mode === 'google'
-        ? { color: '#1b8a3c', weight: 3, opacity: 0.6, dashArray: '8,5' }
-        : { color: color, weight: 3, opacity: 0.6, dashArray: '4,3' };
-      polyline = L.polyline(path, opts2).addTo(map);
+      var path = [[HUB_LAT, HUB_LNG]]
+        .concat(stops.map(function(ll) { return [ll.lat, ll.lng]; }))
+        .concat([[HUB_LAT, HUB_LNG]]);
+      var fbOpts = mode === 'google' ? fallbackGoogleOpts : fallbackOsmOpts;
+      polyline = L.polyline(path, fbOpts).addTo(map);
     }
   }
   if (polyline) {
@@ -786,9 +855,40 @@ function renderRouteDetails(route, color) {
   var stops = (route.stops || []).slice().sort(function(a,b) { return a.sequence - b.sequence; });
   var pins = {}, ovr = 0;
   stops.forEach(function(s) { if (s.dropPincode) pins[s.dropPincode] = 1; if (s.isOverride) ovr++; });
+
+  // Find earnings for this SR from the last summary
+  var earningsHtml = '';
+  if (currentSrName) {
+    var srSummaries = document.querySelectorAll('.sr-item');
+    // Try to get earnings from the last rendered summary data stored in srLayers
+    var layer = srLayers[currentSrName];
+    if (layer && layer.srData) {
+      var d = layer.srData;
+      if (d.netEarnings !== undefined && d.netEarnings !== 0) {
+        earningsHtml =
+          '<div class="stat-box" style="background:#e8f5e9;border-color:#a5d6a7">' +
+            '<div class="val" style="color:#1b5e20;font-size:.95rem">&#x20B9;' + d.grossPayout.toFixed(2) + '</div>' +
+            '<div class="lbl">Gross Payout</div>' +
+          '</div>' +
+          '<div class="stat-box" style="background:#ffebee;border-color:#ef9a9a">' +
+            '<div class="val" style="color:#b71c1c;font-size:.95rem">&#x20B9;' + d.fuelCost.toFixed(2) + '</div>' +
+            '<div class="lbl">Fuel Cost</div>' +
+          '</div>' +
+          '<div class="stat-box" style="background:#e3f2fd;border-color:#90caf9">' +
+            '<div class="val" style="color:#0d47a1;font-size:.95rem">&#x20B9;' + d.netEarnings.toFixed(2) + '</div>' +
+            '<div class="lbl">Net Earnings</div>' +
+          '</div>';
+      }
+    }
+  }
+
   document.getElementById('route-stats').innerHTML =
-    sb(route.totalShipments,'Stops') + sb(route.estimatedDistanceKm ? route.estimatedDistanceKm.toFixed(1) : '-','km') +
-    sb(Object.keys(pins).length,'Pincodes') + sb(ovr,'Overrides');
+    sb(route.totalShipments,'Stops') +
+    sb(route.estimatedDistanceKm ? route.estimatedDistanceKm.toFixed(1) : '-','km') +
+    sb(Object.keys(pins).length,'Pincodes') +
+    sb(ovr,'Overrides') +
+    earningsHtml;
+
   var h = '';
   stops.forEach(function(stop) {
     var tags = '';
