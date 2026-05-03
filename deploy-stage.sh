@@ -3,10 +3,19 @@ set -e
 
 echo "=== LM Routing Stage Deployment ==="
 
+# Switch to root if not already
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Switching to root..."
+  echo "12345" | sudo -S su -c "cd /root/lm-routing && bash deploy-stage.sh"
+  exit 0
+fi
+
+cd /root/lm-routing
+
 # Git config
 git config --global http.sslVerify false
 
-# Set remote with credentials baked in
+# Set remote with credentials
 git remote set-url origin "https://omkar.takale%40xpressbees.com:glpat-wnS5w0y9NaPX43gT-U1zEm86MQp1OjM4CA.01.0y0k4r3ef@scm.xbees.in/global-api/lm-routing.git"
 
 # Pull latest code
