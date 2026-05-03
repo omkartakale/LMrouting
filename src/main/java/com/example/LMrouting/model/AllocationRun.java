@@ -18,6 +18,8 @@ public class AllocationRun {
     private int totalShipments;
     private int totalSrs;
     private double fairnessVariance;
+    /** Earnings range (max − min net earnings) at the time this run was persisted. */
+    private double earningsRange;
     private LocalDateTime createdAt;
     private LocalDateTime finalizedAt;
 }

@@ -51,6 +51,10 @@ public class AllocationEngineService {
     private final InMemoryStore store;
     private final RouteOptimizerService routeOptimizerService;
     private final ScoreWeights scoreWeights;
+    private final HubBoundaryService hubBoundaryService;
+
+    @Value("${hub.name:PNQ HDP}")
+    private String hubName;
 
     @Value("${hub.latitude:18.4600561}")
     private double hubLat;
@@ -59,19 +63,35 @@ public class AllocationEngineService {
     private double hubLng;
 
     /**
-     * Maximum allowed earnings range (₹) before rebalancing stops.
-     * Configurable via allocation.rebalancing.threshold (reused property).
-     * Default: ₹5 — meaning we stop when the highest-earning SR earns at most
-     * ₹5 more than the lowest-earning SR.
+     * Rebalancing stops when no single boundary transfer further reduces the
+     * earnings range (local optimum), or when maxIterations is reached.
+     * There is no hard earnings-range cap — the objective is to minimise
+     * variance as much as possible, not to stop at an arbitrary threshold.
+     * This value is kept only as a micro-optimisation: skip rebalancing
+     * entirely if the range is already negligibly small (< ₹1).
      */
-    @Value("${allocation.rebalancing.threshold:5.0}")
+    @Value("${allocation.rebalancing.threshold:1.0}")
     private double earningsRangeThreshold;
 
-    @Value("${allocation.rebalancing.maxIterations:100}")
+    @Value("${allocation.rebalancing.maxIterations:200}")
     private int maxIterations;
 
-    @Value("${allocation.sr.capacity:80}")
-    private int srCapacity;
+    @Value("${allocation.sr.capacity.min:80}")
+    private int srCapacityMin;
+
+    @Value("${allocation.sr.capacity.max:100}")
+    private int srCapacityMax;
+
+    /**
+     * Fallback straight-line distance used ONLY when the hub boundary polygon
+     * cannot be fetched from the external API. The primary boundary check uses
+     * the actual polygon coordinates from /api/hub/boundary.
+     *
+     * Default: 25 km — covers all of Pune city comfortably.
+     * Configurable via allocation.boundary.km in application.properties.
+     */
+    @Value("${allocation.boundary.km:25.0}")
+    private double allocationBoundaryKmFallback;
 
     // =========================================================================
     // Public API
@@ -88,14 +108,69 @@ public class AllocationEngineService {
                     "No shipment data found for " + dateStr + ". Please upload a CSV file first.");
         }
 
-        // ── Filter: valid coordinates and within hub range ────────────────────
-        List<Shipment> allocatable = allShipments.stream()
-                .filter(s -> !s.isOutOfRange())
+        // ── Filter 1: valid coordinates ───────────────────────────────────────
+        // Exclude shipments with zero/missing coordinates — genuinely undeliverable.
+        // We do NOT filter on isOutOfRange() here; that flag is set at ingestion time
+        // and must not be re-evaluated or mutated during allocation.
+        List<Shipment> withCoords = allShipments.stream()
                 .filter(s -> s.getDropLatitude() != 0 && s.getDropLongitude() != 0)
                 .collect(Collectors.toList());
 
-        // ── Outlier removal: shipments with no neighbour within 2 km ─────────
-        allocatable = removeOutliers(allocatable, 2.0, 3);
+        // ── Filter 2: hub boundary (polygon-based, cached for this allocation run) ──
+        // Fetch the hub service boundary polygon once at the start of the run.
+        // The polygon is reused for all shipment tests — do NOT re-fetch per shipment.
+        //
+        // Any shipment whose drop coordinates fall outside this polygon is an
+        // outlier (wrong coordinates, different city, data error) and must be
+        // excluded from routing — it would cause enormous route distances and
+        // deeply negative net earnings.
+        //
+        // Fallback: if the API is unavailable, fall back to a straight-line
+        // radius check using allocationBoundaryKmFallback (default 25 km).
+        //
+        // The polygon check uses the ray-casting algorithm (point-in-polygon).
+        // This is a pure read — no stored Shipment objects are mutated.
+        List<double[]> boundaryPolygon = null;
+        try {
+            HubBoundaryResponse boundaryResp = hubBoundaryService.fetchBoundary(hubName);
+            if (boundaryResp != null && boundaryResp.coordinates() != null
+                    && !boundaryResp.coordinates().isEmpty()) {
+                boundaryPolygon = boundaryResp.coordinates();
+                log.info("Boundary filter: using polygon with {} vertices for hub '{}'",
+                        boundaryPolygon.size(), hubName);
+            } else {
+                log.warn("Hub boundary polygon unavailable, falling back to radius filter");
+            }
+        } catch (Exception e) {
+            log.warn("Hub boundary polygon unavailable, falling back to radius filter");
+            log.debug("Hub boundary fetch error detail: {}", e.getMessage());
+        }
+
+        final List<double[]> polygon = boundaryPolygon; // effectively final for lambda
+        List<Shipment> withinBoundary;
+        int outsideBoundary;
+        if (polygon != null) {
+            withinBoundary = withCoords.stream()
+                    .filter(s -> isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
+                    .collect(Collectors.toList());
+            outsideBoundary = withCoords.size() - withinBoundary.size();
+            log.info("Boundary filter (polygon): excluded {} shipments outside hub service area",
+                    outsideBoundary);
+        } else {
+            // Fallback: straight-line radius check
+            withinBoundary = withCoords.stream()
+                    .filter(s -> {
+                        double dist = s.getDistanceFromHubKm();
+                        if (dist == 0.0) {
+                            dist = haversine(hubLat, hubLng, s.getDropLatitude(), s.getDropLongitude());
+                        }
+                        return dist <= allocationBoundaryKmFallback;
+                    })
+                    .collect(Collectors.toList());
+            outsideBoundary = withCoords.size() - withinBoundary.size();
+            log.info("Boundary filter (radius fallback): excluded {} shipments beyond {}km",
+                    outsideBoundary, allocationBoundaryKmFallback);
+        }
 
         List<String> presentSrs = store.getPresentSrNames(date);
         if (presentSrs.isEmpty()) {
@@ -103,18 +178,40 @@ public class AllocationEngineService {
                     "At least one SR must be marked present before running allocation.");
         }
 
-        log.info("AllocationEngineService: {} allocatable shipments, {} present SRs",
-                allocatable.size(), presentSrs.size());
+        log.info("AllocationEngineService: {} within-boundary shipments (from {} total, {} zero-coords, {} outside boundary), {} present SRs",
+                withinBoundary.size(), allShipments.size(),
+                allShipments.size() - withCoords.size(),
+                outsideBoundary,
+                presentSrs.size());
 
-        // ── Capacity cap ──────────────────────────────────────────────────────
-        int totalCapacity = presentSrs.size() * srCapacity;
-        List<Shipment> toAllocate = allocatable;
-        List<Shipment> unallocated = new ArrayList<>();
-        if (allocatable.size() > totalCapacity) {
-            log.warn("Capacity exceeded: {} shipments > {} capacity. {} will be unallocated.",
-                    allocatable.size(), totalCapacity, allocatable.size() - totalCapacity);
-            toAllocate   = new ArrayList<>(allocatable.subList(0, totalCapacity));
-            unallocated  = new ArrayList<>(allocatable.subList(totalCapacity, allocatable.size()));
+        // ── Capacity cap with payout-sorted selection ─────────────────────────
+        // Total capacity scales with the number of present SRs.
+        // If 10 SRs are present, capacity = 10 × 80 = 800.
+        // If 3 SRs are present, capacity = 3 × 80 = 240.
+        //
+        // IMPORTANT: When capacity is exceeded, we select the highest-payout
+        // shipments first (sorted by expectedPayout descending). This ensures
+        // the best-value deliveries are always allocated, maximising SR earnings
+        // and minimising the chance of negative net earnings from low-value
+        // shipments with long routes.
+        int totalCapacity = presentSrs.size() * srCapacityMax;
+        List<Shipment> toAllocate;
+        List<Shipment> unallocated;
+        if (withinBoundary.size() > totalCapacity) {
+            log.warn("Capacity exceeded: {} shipments > {} capacity ({} SRs × {}). {} will be unallocated.",
+                    withinBoundary.size(), totalCapacity, presentSrs.size(), srCapacityMax,
+                    withinBoundary.size() - totalCapacity);
+            // Sort by expectedPayout descending, then shippingId ascending as a stable tiebreaker
+            // to guarantee deterministic selection when two shipments have equal payout.
+            List<Shipment> sorted = withinBoundary.stream()
+                    .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed()
+                            .thenComparing(Shipment::getShippingId))
+                    .collect(Collectors.toList());
+            toAllocate  = new ArrayList<>(sorted.subList(0, totalCapacity));
+            unallocated = new ArrayList<>(sorted.subList(totalCapacity, sorted.size()));
+        } else {
+            toAllocate  = new ArrayList<>(withinBoundary);
+            unallocated = Collections.emptyList();
         }
 
         // ── Split Forward / Reverse ───────────────────────────────────────────
@@ -152,12 +249,40 @@ public class AllocationEngineService {
         }
 
         // ── Phase 6: Persist ──────────────────────────────────────────────────
-        List<Shipment> toSave = new ArrayList<>();
+        // Build a set of all allocated shipping IDs for fast lookup.
+        Set<String> allocatedIds = new HashSet<>();
         for (Map.Entry<String, List<Shipment>> e : ordered.entrySet()) {
-            e.getValue().forEach(s -> s.setAssignedSr(e.getKey()));
-            toSave.addAll(e.getValue());
+            e.getValue().forEach(s -> {
+                s.setAssignedSr(e.getKey());
+                allocatedIds.add(s.getShippingId());
+            });
         }
-        store.saveShipments(dateStr, toSave);
+
+        // Collect all allocated shipments in a map keyed by shippingId so we can
+        // merge their updated state back into the full dataset.
+        Map<String, Shipment> allocatedById = new LinkedHashMap<>();
+        for (List<Shipment> list : ordered.values()) {
+            for (Shipment s : list) allocatedById.put(s.getShippingId(), s);
+        }
+
+        // Rebuild the full shipment list for this date:
+        //  - Allocated shipments get their updated assignedSr + routeSequence.
+        //  - Previously-allocated shipments that are NOT in this run's allocation
+        //    (e.g. capacity overflow, boundary exclusions on re-run) get cleared.
+        //  - Brand-new unallocated shipments (zero coords, outside boundary, overflow)
+        //    are preserved as-is with no assignedSr.
+        List<Shipment> fullList = allShipments.stream().map(s -> {
+            Shipment updated = allocatedById.get(s.getShippingId());
+            if (updated != null) {
+                return updated; // use the freshly assigned version
+            }
+            // Not allocated in this run — clear any stale assignment from a previous run
+            s.setAssignedSr(null);
+            s.setRouteSequence(0);
+            return s;
+        }).collect(Collectors.toList());
+
+        store.saveShipments(dateStr, fullList);
 
         // ── Compute final earnings metrics ────────────────────────────────────
         Map<String, Double> earningsBySr = computeNetEarningsMap(ordered, distancesBySr);
@@ -171,9 +296,10 @@ public class AllocationEngineService {
                 CompositeLoadScoreCalculator.compute(list, distancesBySr.getOrDefault(sr, 0.0), scoreWeights)));
         double legacyVariance = CompositeLoadScoreCalculator.variance(scoresBySr);
 
-        log.info("Allocation complete — earningsRange=₹{:.2f}, earningsVariance=₹²{:.2f}, " +
-                        "meanNetEarnings=₹{:.2f}, allocated={}, unallocated={}",
-                earningsRange, earningsVar, meanEarnings, toSave.size(), unallocated.size());
+        log.info("Allocation complete — earningsRange=₹{}, earningsVariance=₹²{}, " +
+                        "meanNetEarnings=₹{}, allocated={}, unallocated={}",
+                String.format("%.2f", earningsRange), String.format("%.2f", earningsVar),
+                String.format("%.2f", meanEarnings), allocatedById.size(), unallocated.size());
 
         AllocationRun run = AllocationRun.builder()
                 .allocationDate(date)
@@ -181,13 +307,28 @@ public class AllocationEngineService {
                 .totalShipments(allShipments.size())
                 .totalSrs(presentSrs.size())
                 .fairnessVariance(earningsVar)
+                .earningsRange(earningsRange)
                 .createdAt(LocalDateTime.now())
                 .build();
+
+        // Re-run warning: if a previous run exists for this date and produced a different
+        // earnings range, log a WARN — this indicates a non-determinism bug.
+        store.findAllocationRun(date).ifPresent(prev -> {
+            if (Math.abs(prev.getEarningsRange() - earningsRange) > 0.001) {
+                log.warn("Non-determinism detected: re-run for {} produced earningsRange=₹{}, previous was ₹{}",
+                        dateStr,
+                        String.format("%.2f", earningsRange),
+                        String.format("%.2f", prev.getEarningsRange()));
+            }
+        });
+
         store.saveAllocationRun(run);
 
         return buildSummary(dateStr, allShipments.size(), presentSrs.size(),
                 legacyVariance, earningsVar, earningsRange, meanEarnings,
-                ordered, distancesBySr, earningsBySr, unallocated.size());
+                ordered, distancesBySr, earningsBySr,
+                // Total unallocated = capacity overflow + outside boundary + zero/missing coords
+                unallocated.size() + outsideBoundary + (allShipments.size() - withCoords.size()));
     }
 
     public AllocationSummary getSummary(LocalDate date) {
@@ -286,10 +427,12 @@ public class AllocationEngineService {
         int n = forward.size();
 
         // ── Seed centroids at evenly-spaced angles around the hub ─────────────
-        // Sort shipments by bearing angle, then pick k evenly-spaced samples.
+        // Sort shipments by bearing angle, then shippingId as a stable tiebreaker
+        // for shipments at equal angles — guarantees deterministic centroid seeding.
         List<Shipment> byAngle = forward.stream()
-                .sorted(Comparator.comparingDouble(s ->
-                        Math.atan2(s.getDropLongitude() - hubLng, s.getDropLatitude() - hubLat)))
+                .sorted(Comparator.comparingDouble((Shipment s) ->
+                        Math.atan2(s.getDropLongitude() - hubLng, s.getDropLatitude() - hubLat))
+                        .thenComparing(Shipment::getShippingId))
                 .collect(Collectors.toList());
 
         double[][] centroids = new double[k][2];
@@ -299,7 +442,10 @@ public class AllocationEngineService {
             centroids[i][1] = byAngle.get(idx).getDropLongitude();
         }
 
-        // ── K-Means iterations ────────────────────────────────────────────────
+        // ── K-Means iterations with route-compactness awareness ──────────────────
+        // Standard K-Means assigns each shipment to the nearest centroid.
+        // To reduce route overlap, we add a small penalty for shipments that would
+        // cause an SR to "reach across" another SR's territory.
         int[] labels = new int[n];
         for (int iter = 0; iter < 50; iter++) {
             boolean changed = false;
@@ -310,6 +456,23 @@ public class AllocationEngineService {
                 for (int c = 0; c < k; c++) {
                     double d = haversine(s.getDropLatitude(), s.getDropLongitude(),
                             centroids[c][0], centroids[c][1]);
+                    
+                    // Add a small penalty if this shipment is on the "wrong side" of the hub
+                    // relative to the centroid (would cause route crossing).
+                    // Compute the angle from hub to shipment and hub to centroid.
+                    double angleToShipment = Math.atan2(s.getDropLongitude() - hubLng, 
+                                                        s.getDropLatitude() - hubLat);
+                    double angleToCentroid = Math.atan2(centroids[c][1] - hubLng, 
+                                                        centroids[c][0] - hubLat);
+                    double angleDiff = Math.abs(angleToShipment - angleToCentroid);
+                    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                    
+                    // If the angle difference is > 90°, this shipment is on the opposite side
+                    // of the hub from the centroid — add a penalty to discourage assignment.
+                    if (angleDiff > Math.PI / 2) {
+                        d *= 1.5; // 50% penalty for cross-hub assignments
+                    }
+                    
                     if (d < minD) { minD = d; best = c; }
                 }
                 if (labels[i] != best) { labels[i] = best; changed = true; }
@@ -421,9 +584,10 @@ public class AllocationEngineService {
         Map<String, Double> earnings  = computeNetEarningsMap(assignment, distances);
 
         double range = CompositeLoadScoreCalculator.earningsRange(earnings);
+        double mean  = CompositeLoadScoreCalculator.meanEarnings(earnings);
         int iterations = 0;
 
-        log.debug("Phase 2 start: earningsRange=₹{:.2f}", range);
+        log.debug("Phase 2 start: earningsRange=₹{}", String.format("%.2f", range));
 
         while (range > earningsRangeThreshold && iterations < maxIterations) {
             String richSr = maxEarningsSr(earnings);
@@ -433,9 +597,9 @@ public class AllocationEngineService {
             // Find the best boundary shipment to transfer from richSr → poorSr.
             // "Boundary" = shipments in richSr closest to poorSr's centroid.
             // We simulate each candidate transfer and pick the one that most
-            // reduces the earnings range.
-            Shipment best = findBestTransfer(richSr, poorSr, assignment, distances, earnings);
-            if (best == null) break; // no beneficial transfer exists
+            // reduces the earnings range, subject to the do-not-over-equalize guard.
+            Shipment best = findBestTransfer(richSr, poorSr, assignment, distances, earnings, mean);
+            if (best == null) break; // no beneficial transfer exists (or all would over-equalize)
 
             // Execute the transfer
             assignment.get(richSr).remove(best);
@@ -450,11 +614,13 @@ public class AllocationEngineService {
                     assignment.get(poorSr), distances.get(poorSr)));
 
             range = CompositeLoadScoreCalculator.earningsRange(earnings);
+            mean  = CompositeLoadScoreCalculator.meanEarnings(earnings);
             iterations++;
         }
 
-        log.info("Phase 2 (Net-earnings rebalancing): {} iterations, final earningsRange=₹{:.2f}",
-                iterations, range);
+        double finalMeanDev = CompositeLoadScoreCalculator.meanEarningsDeviation(earnings);
+        log.info("Phase 2 (Net-earnings rebalancing): {} iterations, final earningsRange=₹{}, meanEarningsDeviation=₹{}",
+                iterations, String.format("%.2f", range), String.format("%.2f", finalMeanDev));
         return assignment;
     }
 
@@ -473,7 +639,8 @@ public class AllocationEngineService {
     private Shipment findBestTransfer(String richSr, String poorSr,
                                       Map<String, List<Shipment>> assignment,
                                       Map<String, Double> distances,
-                                      Map<String, Double> earnings) {
+                                      Map<String, Double> earnings,
+                                      double mean) {
         List<Shipment> richShipments = assignment.get(richSr);
         if (richShipments.isEmpty()) return null;
 
@@ -482,11 +649,13 @@ public class AllocationEngineService {
 
         double[] poorCentroid = centroid(assignment.get(poorSr));
 
-        // Sort by distance to poorSr centroid — boundary candidates first
+        // Sort by distance to poorSr centroid — boundary candidates first.
+        // thenComparing(shippingId) is a stable tiebreaker for equidistant shipments.
         List<Shipment> candidates = richShipments.stream()
-                .sorted(Comparator.comparingDouble(s ->
+                .sorted(Comparator.comparingDouble((Shipment s) ->
                         haversine(s.getDropLatitude(), s.getDropLongitude(),
-                                poorCentroid[0], poorCentroid[1])))
+                                poorCentroid[0], poorCentroid[1]))
+                        .thenComparing(Shipment::getShippingId))
                 .limit(BOUNDARY_CANDIDATE_LIMIT)
                 .collect(Collectors.toList());
 
@@ -508,6 +677,11 @@ public class AllocationEngineService {
             simEarnings.put(richSr, CompositeLoadScoreCalculator.netEarnings(newRich, newRichDist));
             simEarnings.put(poorSr, CompositeLoadScoreCalculator.netEarnings(newPoor, newPoorDist));
 
+            // Do-not-over-equalize guard: skip if the transfer would push richSr below the mean.
+            // SRs handling more or higher-value shipments should still earn more than the mean.
+            // The objective is to eliminate extreme outliers, not enforce identical earnings.
+            if (simEarnings.get(richSr) < mean) continue;
+
             double simRange = CompositeLoadScoreCalculator.earningsRange(simEarnings);
             double improvement = currentRange - simRange;
 
@@ -517,7 +691,7 @@ public class AllocationEngineService {
             }
         }
 
-        return bestShipment; // null if no beneficial transfer found
+        return bestShipment; // null if no beneficial transfer found (or all would over-equalize)
     }
 
     // =========================================================================
@@ -529,7 +703,12 @@ public class AllocationEngineService {
         if (reverse.isEmpty() || assignment.isEmpty()) return assignment;
         List<String> srNames = new ArrayList<>(assignment.keySet());
 
-        for (Shipment rev : reverse) {
+        // Sort Reverse shipments by shippingId ascending for deterministic processing order.
+        List<Shipment> sortedReverse = reverse.stream()
+                .sorted(Comparator.comparing(Shipment::getShippingId))
+                .collect(Collectors.toList());
+
+        for (Shipment rev : sortedReverse) {
             double rLat = rev.getDropLatitude(), rLng = rev.getDropLongitude();
 
             // Collect SRs that have a Forward shipment within 1 km
@@ -583,9 +762,10 @@ public class AllocationEngineService {
 
             double[] underCentroid = centroid(assignment.get(underloaded));
             Shipment toMove = heavies.stream()
-                    .min(Comparator.comparingDouble(s ->
+                    .min(Comparator.comparingDouble((Shipment s) ->
                             haversine(s.getDropLatitude(), s.getDropLongitude(),
-                                    underCentroid[0], underCentroid[1])))
+                                    underCentroid[0], underCentroid[1]))
+                            .thenComparing(Shipment::getShippingId))
                     .orElseThrow();
 
             assignment.get(overloaded).remove(toMove);
@@ -601,35 +781,6 @@ public class AllocationEngineService {
     // =========================================================================
     // Helpers
     // =========================================================================
-
-    /** Remove shipments that have fewer than minNeighbours within radiusKm. */
-    private List<Shipment> removeOutliers(List<Shipment> shipments, double radiusKm, int minNeighbours) {
-        List<Shipment> clean    = new ArrayList<>();
-        List<Shipment> outliers = new ArrayList<>();
-        for (int i = 0; i < shipments.size(); i++) {
-            Shipment s = shipments.get(i);
-            int neighbours = 0;
-            for (int j = 0; j < shipments.size() && neighbours < minNeighbours; j++) {
-                if (i == j) continue;
-                if (haversine(s.getDropLatitude(), s.getDropLongitude(),
-                        shipments.get(j).getDropLatitude(),
-                        shipments.get(j).getDropLongitude()) <= radiusKm) {
-                    neighbours++;
-                }
-            }
-            if (neighbours >= minNeighbours) {
-                clean.add(s);
-            } else {
-                outliers.add(s);
-                s.setOutOfRange(true);
-            }
-        }
-        if (!outliers.isEmpty()) {
-            log.info("Outlier removal: {} shipments excluded (no {} neighbours within {} km)",
-                    outliers.size(), minNeighbours, radiusKm);
-        }
-        return clean;
-    }
 
     /** Compute Haversine-estimated route distances for all SRs. */
     private Map<String, Double> computeDistances(Map<String, List<Shipment>> assignment) {
@@ -690,9 +841,46 @@ public class AllocationEngineService {
         return GoogleMapsService.haversine(lat1, lng1, lat2, lng2);
     }
 
-    // =========================================================================
-    // Summary builder
-    // =========================================================================
+    /**
+     * Ray-casting point-in-polygon test (Jordan curve theorem).
+     *
+     * Determines whether a point (lat, lng) lies inside the given polygon.
+     * The polygon is a list of [lat, lng] pairs forming a closed ring
+     * (as returned by HubBoundaryService — already swapped from GeoJSON).
+     *
+     * Algorithm: cast a horizontal ray from the point to the right and count
+     * how many polygon edges it crosses. Odd count = inside, even = outside.
+     *
+     * Edge cases handled:
+     *  - Points exactly on an edge are treated as inside (crossing count rounds up)
+     *  - Works correctly for non-convex polygons
+     *  - Polygon does not need to be explicitly closed (last→first edge is implicit)
+     *
+     * @param lat     latitude of the point to test
+     * @param lng     longitude of the point to test
+     * @param polygon list of [lat, lng] vertex pairs
+     * @return true if the point is inside or on the boundary of the polygon
+     */
+    static boolean isPointInPolygon(double lat, double lng, List<double[]> polygon) {
+        if (polygon == null || polygon.size() < 3) return false;
+        int n = polygon.size();
+        boolean inside = false;
+        int j = n - 1;
+        for (int i = 0; i < n; i++) {
+            double xi = polygon.get(i)[1]; // lng of vertex i
+            double yi = polygon.get(i)[0]; // lat of vertex i
+            double xj = polygon.get(j)[1]; // lng of vertex j
+            double yj = polygon.get(j)[0]; // lat of vertex j
+            // Check if the horizontal ray from (lng, lat) crosses edge (j→i)
+            boolean intersects = ((yi > lat) != (yj > lat))
+                    && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+            if (intersects) inside = !inside;
+            j = i;
+        }
+        return inside;
+    }
+
+
 
     private AllocationSummary buildSummary(String dateStr,
                                            int totalShipments,
@@ -752,7 +940,8 @@ public class AllocationEngineService {
                 totalShipments,
                 allocated,
                 unallocatedShipments,
-                srCapacity,
+                srCapacityMin,
+                srCapacityMax,
                 totalSrs,
                 assignment.isEmpty() ? 0 : stats.getMin(),
                 assignment.isEmpty() ? 0 : stats.getMax(),

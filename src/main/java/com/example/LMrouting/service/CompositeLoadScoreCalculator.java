@@ -115,6 +115,26 @@ public class CompositeLoadScoreCalculator {
         return earningsBySr.values().stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
     }
 
+    /**
+     * Compute the mean earnings deviation — the average absolute difference
+     * between each SR's net earnings and the mean net earnings across all SRs.
+     *
+     * <p>This is the co-primary fairness objective alongside the earnings range.
+     * Reducing the gap between each individual SR and the mean is as important
+     * as reducing the gap between the highest and lowest earner.
+     *
+     * @param earningsBySr map of SR name → net earnings
+     * @return mean absolute deviation in ₹, or 0.0 if fewer than 2 SRs
+     */
+    public static double meanEarningsDeviation(Map<String, Double> earningsBySr) {
+        if (earningsBySr == null || earningsBySr.size() < 2) return 0.0;
+        double mean = meanEarnings(earningsBySr);
+        return earningsBySr.values().stream()
+                .mapToDouble(e -> Math.abs(e - mean))
+                .average()
+                .orElse(0.0);
+    }
+
     // =========================================================================
     // Composite Load Score (legacy / secondary objective)
     // =========================================================================

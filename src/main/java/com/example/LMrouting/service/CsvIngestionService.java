@@ -89,6 +89,17 @@ public class CsvIngestionService {
         // client_id
         for (String s : new String[]{"client","customer_id","merchant_id","seller_id"})
             m.put(s, "client_id");
+        // expected_payout — the primary earnings field used for payout-sorted capacity selection
+        // "Expected Payout" normalises to "expected_payout" automatically via normalizeColName,
+        // but we also add common short-form aliases so CSVs with different headers are handled.
+        for (String s : new String[]{"payout","exp_payout","expectedpayout","expected_pay",
+                "expected_earning","expected_earnings","earning","earnings","payout_amount",
+                "shipment_payout","delivery_payout"})
+            m.put(s, "expected_payout");
+        // shipment_flow — "shipmenttype" is the column name used in the Locus CSV export
+        // (values: "Delivery" → treated as Forward, "Reverse" → treated as Reverse)
+        for (String s : new String[]{"shipmenttype","shipment_type_locus","deliverytype"})
+            m.put(s, "shipment_flow");
         COLUMN_ALIASES = Collections.unmodifiableMap(m);
     }
 

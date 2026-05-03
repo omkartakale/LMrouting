@@ -9,13 +9,18 @@ import java.util.List;
  *   earningsVariance   — population variance of netEarnings across SRs (lower = fairer)
  *   earningsRange      — max(netEarnings) - min(netEarnings) across SRs (lower = fairer)
  *   meanNetEarnings    — mean netEarnings across SRs
+ *
+ * Capacity range fields:
+ *   capacityRangeMin   — minimum shipments per SR (allocation.sr.capacity.min, default 80)
+ *   capacityRangeMax   — maximum shipments per SR used for total capacity cap (allocation.sr.capacity.max, default 100)
  */
 public record AllocationSummary(
         String date,
         int totalShipments,
         int allocatedShipments,
         int unallocatedShipments,
-        int srCapacity,
+        int capacityRangeMin,
+        int capacityRangeMax,
         int totalSrs,
         int minShipmentsPerSr,
         int maxShipmentsPerSr,
@@ -31,11 +36,12 @@ public record AllocationSummary(
      * Backward-compatible constructor without earnings metrics.
      */
     public AllocationSummary(String date, int totalShipments, int allocatedShipments,
-                              int unallocatedShipments, int srCapacity, int totalSrs,
-                              int minShipmentsPerSr, int maxShipmentsPerSr,
+                              int unallocatedShipments, int capacityRangeMin, int capacityRangeMax,
+                              int totalSrs, int minShipmentsPerSr, int maxShipmentsPerSr,
                               double avgShipmentsPerSr, double fairnessVariance,
                               List<SrSummaryDto> srSummaries) {
-        this(date, totalShipments, allocatedShipments, unallocatedShipments, srCapacity,
+        this(date, totalShipments, allocatedShipments, unallocatedShipments,
+             capacityRangeMin, capacityRangeMax,
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, 0.0, 0.0, 0.0);
     }

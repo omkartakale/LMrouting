@@ -284,6 +284,11 @@ var hasGoogleAllocation = false;
 var googleMapsConfigured = false;
 var orsConfigured = false;
 
+// Hub boundary overlay
+var hubBoundaryLayer = null;
+var hubOriginalBoundaryLayer = null;
+var lastHubName = null;
+
 function esc(s) {
   if (s == null) return '';
   var d = document.createElement('div');
@@ -334,6 +339,7 @@ function loadConfig() {
     .then(function(hub) {
       HUB_LAT = hub.hubLat;
       HUB_LNG = hub.hubLng;
+      lastHubName = hub.hubName || null;
       document.getElementById('hub-info').textContent = hub.hubName + ' (' + hub.hubLat.toFixed(4) + ', ' + hub.hubLng.toFixed(4) + ')';
       map.setView([HUB_LAT, HUB_LNG], 13);
       hubMarker.setLatLng([HUB_LAT, HUB_LNG]);
@@ -375,6 +381,170 @@ function loadConfig() {
       document.getElementById('badge-osm').textContent = 'OSM';
       document.getElementById('badge-google').textContent = 'Google Maps';
     });
+}
+
+// ── HUB BOUNDARY ──────────────────────────────────────────────────────────────
+/**
+ * Fire-and-forget: fetch hub boundary from backend proxy and draw on map.
+ * Silently does nothing if the fetch fails or returns no data.
+ */
+function fetchHubBoundary(hubName) {
+  if (!hubName) return;
+  // Skip re-fetch if same hub boundary is already displayed
+  if (hubBoundaryLayer && lastHubName === hubName) return;
+  lastHubName = hubName;
+
+  fetch('/api/hub/boundary?hubName=' + encodeURIComponent(hubName))
+    .then(function(r) {
+      if (r.status === 204 || !r.ok) return null;
+      return r.json();
+    })
+    .then(function(data) {
+      if (!data || !data.coordinates || !data.coordinates.length) return;
+      drawHubBoundary(data.coordinates, data.originalBoundary, data.hubName || hubName, data.facilityName || hubName);
+    })
+    .catch(function() {
+      // Silent failure — boundary is optional, never block the user
+    });
+}
+
+/**
+ * Ensure the dedicated low-z boundary pane exists.
+ * z-index 200 = below overlayPane (400) and markerPane (600),
+ * so the boundary never obscures routes or shipment pins.
+ */
+function ensureBoundaryPane() {
+  if (!map.getPane('hubBoundaryPane')) {
+    map.createPane('hubBoundaryPane');
+    map.getPane('hubBoundaryPane').style.zIndex = 200;
+    map.getPane('hubBoundaryPane').style.pointerEvents = 'none';
+  }
+}
+
+/**
+ * Draw the hub service boundary and (optionally) the original/admin boundary.
+ *
+ * boundary        — facility.boundary  — the actual hub delivery service area
+ *                   Drawn as a solid amber/orange dashed line with a very light fill.
+ *
+ * originalBoundary — facility.originalBoundary — the broader admin/city boundary
+ *                   Drawn as a thin grey dashed line, no fill, so it's clearly secondary.
+ *
+ * facilityName    — the name the API matched (shown in legend for debugging).
+ */
+function drawHubBoundary(coords, originalCoords, hubName, facilityName) {
+  ensureBoundaryPane();
+
+  // ── Remove existing layers ──────────────────────────────────────────────
+  if (hubBoundaryLayer)         { map.removeLayer(hubBoundaryLayer);         hubBoundaryLayer = null; }
+  if (hubOriginalBoundaryLayer) { map.removeLayer(hubOriginalBoundaryLayer); hubOriginalBoundaryLayer = null; }
+
+  // ── Primary boundary (facility.boundary) ───────────────────────────────
+  if (coords && coords.length) {
+    var latLngs = coords.map(function(p) { return [p[0], p[1]]; });
+    hubBoundaryLayer = L.polygon(latLngs, {
+      pane:        'hubBoundaryPane',
+      color:       '#e65100',   // deep amber — distinct from all SR route colors
+      weight:      2.5,
+      opacity:     0.80,
+      dashArray:   '10, 6',
+      lineCap:     'round',
+      lineJoin:    'round',
+      fillColor:   '#ff6d00',
+      fillOpacity: 0.06,        // 6% — tints interior without obscuring routes
+      interactive: false
+    }).addTo(map);
+
+    hubBoundaryLayer.bindTooltip(
+      '<span style="font-size:.75rem;font-weight:600;color:#e65100">' +
+      '&#x1F4CD; ' + esc(facilityName) + ' — Service Area</span>',
+      { sticky: false, direction: 'top', opacity: 0.95 }
+    );
+  }
+
+  // ── Original / admin boundary (facility.originalBoundary) ──────────────
+  if (originalCoords && originalCoords.length) {
+    var origLatLngs = originalCoords.map(function(p) { return [p[0], p[1]]; });
+    hubOriginalBoundaryLayer = L.polygon(origLatLngs, {
+      pane:        'hubBoundaryPane',
+      color:       '#00838f',   // teal — clearly visible, clearly secondary to amber primary
+      weight:      2,
+      opacity:     0.75,
+      dashArray:   '6, 8',
+      lineCap:     'round',
+      lineJoin:    'round',
+      fillColor:   '#00bcd4',
+      fillOpacity: 0.04,        // 4% — just a hint of teal tint
+      interactive: false
+    }).addTo(map);
+
+    hubOriginalBoundaryLayer.bindTooltip(
+      '<span style="font-size:.75rem;color:#00838f;font-weight:600">' +
+      '&#x1F5FA; ' + esc(facilityName) + ' — Original Boundary</span>',
+      { sticky: false, direction: 'top', opacity: 0.95 }
+    );
+  }
+
+  // ── Update legend ───────────────────────────────────────────────────────
+  updateBoundaryLegend(hubName, facilityName, true);
+}
+
+/**
+ * Add or refresh the hub boundary entry in the map legend.
+ * Shows the matched facility name so mismatches are immediately visible.
+ * Clicking the legend entry toggles both boundary layers.
+ */
+function updateBoundaryLegend(hubName, facilityName, visible) {
+  var existing = document.getElementById('legend-boundary-item');
+  if (!visible) {
+    if (existing) existing.remove();
+    return;
+  }
+  var legendItems = document.getElementById('legend-items');
+  if (!legendItems) return;
+
+  var item = existing || document.createElement('div');
+  item.id = 'legend-boundary-item';
+  item.className = 'legend-item';
+  item.style.cssText = 'margin-top:5px;padding-top:5px;border-top:1px solid #e9ecef;cursor:pointer;flex-direction:column;align-items:flex-start;gap:2px';
+  item.title = 'Click to toggle hub boundary';
+
+  // Show both the hub name and the matched facility name
+  var matchNote = (facilityName && facilityName !== hubName)
+    ? '<div style="font-size:.67rem;color:#78909c;margin-top:1px">matched: ' + esc(facilityName) + '</div>'
+    : '';
+
+  item.innerHTML =
+    '<div style="display:flex;align-items:center;gap:5px">' +
+      '<div style="width:22px;height:0;border-top:2.5px dashed #e65100;flex-shrink:0"></div>' +
+      '<span style="color:#e65100;font-weight:600;font-size:.73rem">' + esc(hubName) + ' boundary</span>' +
+    '</div>' +
+    (hubOriginalBoundaryLayer
+      ? '<div style="display:flex;align-items:center;gap:5px;margin-top:2px">' +
+          '<div style="width:22px;height:0;border-top:2px dashed #00838f;flex-shrink:0"></div>' +
+          '<span style="color:#00838f;font-size:.7rem">original boundary</span>' +
+        '</div>'
+      : '') +
+    matchNote;
+
+  // Toggle both layers on click
+  item.onclick = function() {
+    var anyVisible = (hubBoundaryLayer && map.hasLayer(hubBoundaryLayer)) ||
+                     (hubOriginalBoundaryLayer && map.hasLayer(hubOriginalBoundaryLayer));
+    if (anyVisible) {
+      if (hubBoundaryLayer)         map.removeLayer(hubBoundaryLayer);
+      if (hubOriginalBoundaryLayer) map.removeLayer(hubOriginalBoundaryLayer);
+      item.style.opacity = '0.4';
+      item.title = 'Click to show hub boundary';
+    } else {
+      if (hubBoundaryLayer)         hubBoundaryLayer.addTo(map);
+      if (hubOriginalBoundaryLayer) hubOriginalBoundaryLayer.addTo(map);
+      item.style.opacity = '1';
+      item.title = 'Click to hide hub boundary';
+    }
+  };
+
+  if (!existing) legendItems.appendChild(item);
 }
 
 // ── FILE UPLOAD ───────────────────────────────────────────────────────────────
@@ -466,6 +636,12 @@ function renderUploadResult(data) {
   res.innerHTML = h;
   populateDateSelector(data.datesFound || []);
   if (data.primaryDate) selectDate(data.primaryDate);
+
+  // Fire-and-forget: fetch hub boundary asynchronously after CSV upload
+  // Uses hub name already loaded from /api/hub during map init
+  if (lastHubName) {
+    fetchHubBoundary(lastHubName);
+  }
 }
 
 function statBox(v, l) { return '<div class="stat"><div class="val">' + v + '</div><div class="lbl">' + l + '</div></div>'; }
@@ -631,7 +807,7 @@ function renderSummary(s) {
     sb(s.allocatedShipments != null ? s.allocatedShipments : s.totalShipments, 'Allocated') +
     '<div class="stat-box" style="' + (us > 0 ? 'border-color:#ef9a9a' : '') + '"><div class="val" style="' + (us > 0 ? 'color:#c62828' : '') + '">' + us + '</div><div class="lbl">Unallocated</div></div>' +
     sb(s.totalSrs, 'SRs Active') +
-    sb(s.srCapacity || '-', 'Cap/SR') +
+    sb(s.capacityRangeMin != null && s.capacityRangeMax != null ? s.capacityRangeMin + '–' + s.capacityRangeMax : (s.capacityRangeMax || '-'), 'Cap/SR') +
     sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR') +
     sb(s.fairnessVariance !== undefined ? s.fairnessVariance.toFixed(3) : '-', 'Fairness Var');
 
@@ -717,6 +893,10 @@ function renderSrList(srSummaries) {
     h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
   });
   list.innerHTML = h;
+  // Re-append boundary legend entry after SR list rebuilds the legend
+  if (hubBoundaryLayer && lastHubName) {
+    updateBoundaryLegend(lastHubName, lastHubName, true);
+  }
 }
 
 // ── MAP RENDERING ─────────────────────────────────────────────────────────────
@@ -1014,6 +1194,10 @@ function clearAllocationUI() {
   document.getElementById('compare-banner').style.display = 'none';
   document.getElementById('legend-items').innerHTML =
     '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
+  // Re-add boundary legend entry if boundary is still active
+  if (hubBoundaryLayer && lastHubName) {
+    updateBoundaryLegend(lastHubName, lastHubName, true);
+  }
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────
