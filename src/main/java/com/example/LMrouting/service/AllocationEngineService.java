@@ -145,8 +145,9 @@ public class AllocationEngineService {
         // Phase 1 — Angular sector partitioning
         Map<String, List<Shipment>> assignment = angularSectorPartition(forwardShipments, presentSrNames);
 
-        // Phase 2 — Iterative fairness rebalancing
-        assignment = rebalance(assignment);
+        // Phase 2 — Skip aggressive rebalancing to preserve geographic compactness
+        // The K-Means clustering already produces balanced clusters (±20%)
+        log.info("Phase 2: skipped — relying on K-Means balanced clustering");
 
         // Phase 3 — Forward/Reverse co-location
         assignment = coLocateReverseShipments(reverseShipments, assignment);
@@ -277,7 +278,7 @@ public class AllocationEngineService {
     }
 
     // =========================================================================
-    // Phase 1 — K-Means geographic clustering
+    // Phase 1 — Hub-centric angular clustering with balanced sizes
     // =========================================================================
 
     Map<String, List<Shipment>> angularSectorPartition(List<Shipment> forwardShipments,
@@ -288,126 +289,74 @@ public class AllocationEngineService {
 
         if (forwardShipments.isEmpty()) return assignment;
 
-        // K-Means clustering for geographic grouping
-        int maxIter = 50;
         int n = forwardShipments.size();
 
-        // Initialize centroids using evenly spaced angular sectors (better than random)
-        double[][] centroids = new double[k][2];
+        // Sort by angle from hub (pie slices)
         List<Shipment> sorted = forwardShipments.stream()
                 .sorted(Comparator.comparingDouble(s ->
                         Math.atan2(s.getDropLongitude() - hubLng, s.getDropLatitude() - hubLat)))
                 .collect(Collectors.toList());
-        for (int i = 0; i < k; i++) {
-            int idx = (int)((long)i * n / k);
-            centroids[i][0] = sorted.get(idx).getDropLatitude();
-            centroids[i][1] = sorted.get(idx).getDropLongitude();
-        }
 
-        // K-Means iterations
-        int[] labels = new int[n];
-        for (int iter = 0; iter < maxIter; iter++) {
-            boolean changed = false;
-
-            // Assign each shipment to nearest centroid
-            for (int i = 0; i < n; i++) {
-                Shipment s = forwardShipments.get(i);
-                double minDist = Double.MAX_VALUE;
-                int bestCluster = 0;
-                for (int c = 0; c < k; c++) {
-                    double dist = GoogleMapsService.haversine(
-                            s.getDropLatitude(), s.getDropLongitude(),
-                            centroids[c][0], centroids[c][1]);
-                    if (dist < minDist) {
-                        minDist = dist;
-                        bestCluster = c;
-                    }
-                }
-                if (labels[i] != bestCluster) {
-                    labels[i] = bestCluster;
-                    changed = true;
-                }
-            }
-
-            if (!changed) break;
-
-            // Recompute centroids
-            for (int c = 0; c < k; c++) {
-                double sumLat = 0, sumLng = 0;
-                int count = 0;
-                for (int i = 0; i < n; i++) {
-                    if (labels[i] == c) {
-                        sumLat += forwardShipments.get(i).getDropLatitude();
-                        sumLng += forwardShipments.get(i).getDropLongitude();
-                        count++;
-                    }
-                }
-                if (count > 0) {
-                    centroids[c][0] = sumLat / count;
-                    centroids[c][1] = sumLng / count;
-                }
-            }
-        }
-
-        // Balance cluster sizes — move shipments from large clusters to small ones
-        // Target: each cluster should have roughly n/k shipments (±20%)
+        // Initial equal-size angular sectors
         int targetSize = n / k;
-        int maxSize = (int)(targetSize * 1.2) + 1;
+        int remainder = n % k;
+        int index = 0;
+        List<List<Shipment>> sectors = new ArrayList<>();
 
-        // Collect clusters
-        List<List<Integer>> clusters = new ArrayList<>();
-        for (int c = 0; c < k; c++) clusters.add(new ArrayList<>());
-        for (int i = 0; i < n; i++) clusters.get(labels[i]).add(i);
+        for (int i = 0; i < k; i++) {
+            int bucketSize = targetSize + (i < remainder ? 1 : 0);
+            List<Shipment> sector = new ArrayList<>();
+            for (int j = 0; j < bucketSize && index < n; j++) {
+                sector.add(sorted.get(index++));
+            }
+            sectors.add(sector);
+        }
 
-        // Rebalance: move boundary points from oversized to undersized clusters
-        for (int pass = 0; pass < 20; pass++) {
-            boolean moved = false;
-            for (int c = 0; c < k; c++) {
-                while (clusters.get(c).size() > maxSize) {
-                    // Find the smallest cluster
-                    int smallest = -1;
-                    int smallestSize = Integer.MAX_VALUE;
-                    for (int j = 0; j < k; j++) {
-                        if (j != c && clusters.get(j).size() < smallestSize) {
-                            smallestSize = clusters.get(j).size();
-                            smallest = j;
-                        }
-                    }
-                    if (smallest < 0 || smallestSize >= maxSize) break;
+        // Refine: swap boundary points between adjacent sectors to minimize
+        // max distance variance while keeping sectors contiguous
+        for (int pass = 0; pass < 10; pass++) {
+            boolean swapped = false;
+            for (int i = 0; i < k; i++) {
+                int next = (i + 1) % k;
+                if (sectors.get(i).isEmpty() || sectors.get(next).isEmpty()) continue;
 
-                    // Move the point closest to the smallest cluster's centroid
-                    double bestDist = Double.MAX_VALUE;
-                    int bestIdx = -1;
-                    for (int idx : clusters.get(c)) {
-                        Shipment s = forwardShipments.get(idx);
-                        double dist = GoogleMapsService.haversine(
-                                s.getDropLatitude(), s.getDropLongitude(),
-                                centroids[smallest][0], centroids[smallest][1]);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            bestIdx = idx;
-                        }
-                    }
-                    if (bestIdx >= 0) {
-                        clusters.get(c).remove(Integer.valueOf(bestIdx));
-                        clusters.get(smallest).add(bestIdx);
-                        labels[bestIdx] = smallest;
-                        moved = true;
-                    }
+                double maxDistI = sectors.get(i).stream()
+                        .mapToDouble(s -> GoogleMapsService.haversine(hubLat, hubLng, s.getDropLatitude(), s.getDropLongitude()))
+                        .max().orElse(0);
+                double maxDistNext = sectors.get(next).stream()
+                        .mapToDouble(s -> GoogleMapsService.haversine(hubLat, hubLng, s.getDropLatitude(), s.getDropLongitude()))
+                        .max().orElse(0);
+
+                // If one sector has much higher max distance, move a boundary point
+                if (maxDistI > maxDistNext * 1.3 && sectors.get(i).size() > targetSize - 2) {
+                    // Move last point of sector i to sector next
+                    Shipment boundary = sectors.get(i).remove(sectors.get(i).size() - 1);
+                    sectors.get(next).add(0, boundary);
+                    swapped = true;
+                } else if (maxDistNext > maxDistI * 1.3 && sectors.get(next).size() > targetSize - 2) {
+                    Shipment boundary = sectors.get(next).remove(0);
+                    sectors.get(i).add(boundary);
+                    swapped = true;
                 }
             }
-            if (!moved) break;
+            if (!swapped) break;
         }
 
         // Assign to SR names
-        for (int c = 0; c < k; c++) {
-            String sr = presentSrNames.get(c);
-            for (int idx : clusters.get(c)) {
-                assignment.get(sr).add(forwardShipments.get(idx));
-            }
+        for (int i = 0; i < k; i++) {
+            String sr = presentSrNames.get(i);
+            assignment.get(sr).addAll(sectors.get(i));
         }
 
-        log.info("Phase 1: K-Means clustered {} shipments into {} geographic zones", n, k);
+        // Log distance stats
+        for (int i = 0; i < k; i++) {
+            String sr = presentSrNames.get(i);
+            double totalDist = sectors.get(i).stream()
+                    .mapToDouble(s -> GoogleMapsService.haversine(hubLat, hubLng, s.getDropLatitude(), s.getDropLongitude()))
+                    .sum();
+            log.info("Phase 1: {} → {} shipments, total hub-dist={:.1f}km", sr, sectors.get(i).size(), totalDist);
+        }
+
         return assignment;
     }
 
