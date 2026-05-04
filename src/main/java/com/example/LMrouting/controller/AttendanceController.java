@@ -73,13 +73,13 @@ public class AttendanceController {
     // -------------------------------------------------------------------------
 
     @PostMapping("/sr")
-    public ResponseEntity<Void> addSr(@RequestBody java.util.Map<String, String> body) {
+    public ResponseEntity<java.util.Map<String, String>> addSr(@RequestBody java.util.Map<String, String> body) {
         String srName = body.get("srName");
         if (srName == null || srName.isBlank()) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "SR name cannot be empty"));
         }
         log.info("AttendanceController: POST /api/attendance/sr — adding '{}'", srName.trim());
         attendanceManagerService.addSr(srName.trim());
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.ok(java.util.Map.of("success", "true", "srName", srName.trim()));
     }
 }

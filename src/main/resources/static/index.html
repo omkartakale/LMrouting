@@ -209,27 +209,112 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <!-- Allocation -->
     <div class="panel">
       <div class="panel-title">Allocation</div>
-      <select id="date-select">
-        <option value="">-- Select date --</option>
-      </select>
-      <div class="btn-row" style="margin-bottom:6px">
-        <button class="btn btn-primary" id="run-osm-btn" title="Allocate routes using OpenStreetMap (ORS) road data">
-          &#x1F5FA; Run Allocation (OSM)
+      
+      <!-- Mode Toggle -->
+      <div style="display:flex;gap:4px;margin-bottom:10px;background:#f8f9fa;border-radius:6px;padding:3px">
+        <button class="btn" id="mode-standard-btn" onclick="switchAllocationMode('standard')" style="flex:1;padding:6px 10px;font-size:.78rem;background:#1976d2;color:#fff;border:none">
+          &#x1F6E3; Standard Routing
         </button>
-        <button class="btn btn-google" id="run-google-btn" title="Allocate routes using Google Maps road data — requires Google Maps API key">
-          &#x1F5FA; Run Allocation (Google Maps)
+        <button class="btn" id="mode-affinity-btn" onclick="switchAllocationMode('affinity')" style="flex:1;padding:6px 10px;font-size:.78rem;background:#e9ecef;color:#495057;border:1px solid #ced4da">
+          &#x1F5FA; Affinity Mode
         </button>
       </div>
-      <div class="btn-row">
-        <button class="btn btn-compare" id="compare-btn" disabled title="Show both OSM and Google Maps routes side by side for comparison">
-          &#x1F50D; Compare Routes
-        </button>
-        <button class="btn btn-secondary" id="undo-btn" disabled>&#x21A9; Undo</button>
-        <button class="btn btn-secondary" id="finalize-btn" disabled>&#x2705; Finalize</button>
+      
+      <!-- Standard Mode Workflow -->
+      <div id="standard-workflow">
+        <select id="date-select">
+          <option value="">-- Select date --</option>
+        </select>
+        <div class="btn-row" style="margin-bottom:6px">
+          <button class="btn btn-primary" id="run-osm-btn" title="Allocate routes using OpenStreetMap (ORS) road data">
+            &#x1F5FA; Run Allocation (OSM)
+          </button>
+          <button class="btn btn-google" id="run-google-btn" title="Allocate routes using Google Maps road data — requires Google Maps API key">
+            &#x1F5FA; Run Allocation (Google Maps)
+          </button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-compare" id="compare-btn" disabled title="Show both OSM and Google Maps routes side by side for comparison">
+            &#x1F50D; Compare Routes
+          </button>
+          <button class="btn btn-secondary" id="undo-btn" disabled>&#x21A9; Undo</button>
+          <button class="btn btn-secondary" id="finalize-btn" disabled>&#x2705; Finalize</button>
+        </div>
+        <div id="alloc-error" class="banner error"></div>
+        <div id="alloc-info" class="banner info"></div>
+        <div id="finalized-banner" class="banner success">&#x2705; Allocation finalized - overrides locked</div>
       </div>
-      <div id="alloc-error" class="banner error"></div>
-      <div id="alloc-info" class="banner info"></div>
-      <div id="finalized-banner" class="banner success">&#x2705; Allocation finalized - overrides locked</div>
+
+      <!-- Affinity Mode Workflow -->
+      <div id="affinity-workflow" style="display:none">
+        <div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:8px 10px;margin-bottom:10px">
+          <div style="font-size:.82rem;font-weight:700;color:#0d47a1;margin-bottom:6px">&#x1F5FA; Affinity Mode Allocation Workflow</div>
+
+          <!-- Step 1: Upload CSV -->
+          <div id="affinity-step-1" style="padding:5px 0;border-bottom:1px solid #bbdefb;display:flex;align-items:flex-start;gap:7px">
+            <div id="affinity-step-1-icon" style="width:20px;height:20px;border-radius:50%;background:#43a047;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">1</div>
+            <div style="flex:1">
+              <div style="font-size:.78rem;font-weight:600;color:#0d47a1">Upload CSV</div>
+              <div style="font-size:.72rem;color:#546e7a">Upload shipment data using the panel above</div>
+            </div>
+          </div>
+
+          <!-- Step 2: Select Date & Configure Regions -->
+          <div id="affinity-step-2" style="padding:5px 0;border-bottom:1px solid #bbdefb;display:flex;align-items:flex-start;gap:7px">
+            <div id="affinity-step-2-icon" style="width:20px;height:20px;border-radius:50%;background:#90a4ae;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">2</div>
+            <div style="flex:1">
+              <div style="font-size:.78rem;font-weight:600;color:#0d47a1">View Map &amp; Configure Regions</div>
+              <div style="font-size:.72rem;color:#546e7a;margin-bottom:5px">Select date, then open the affinity map to view shipments and configure regions</div>
+              <select id="affinity-date-select" style="margin-bottom:5px">
+                <option value="">-- Select date --</option>
+              </select>
+              <button class="btn btn-primary" id="open-affinity-map-btn" style="width:100%;font-size:.76rem;padding:6px 10px" onclick="openAffinityMap()">
+                &#x1F5FA; Open Affinity Map &amp; Configure Regions
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 3: Auto-Distribute SRs -->
+          <div id="affinity-step-3" style="padding:5px 0;border-bottom:1px solid #bbdefb;display:flex;align-items:flex-start;gap:7px">
+            <div id="affinity-step-3-icon" style="width:20px;height:20px;border-radius:50%;background:#90a4ae;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">3</div>
+            <div style="flex:1">
+              <div style="font-size:.78rem;font-weight:600;color:#0d47a1">Auto-Distribute SRs</div>
+              <div style="font-size:.72rem;color:#546e7a;margin-bottom:5px">Distribute present SRs across affinity regions based on shipment density</div>
+              <button class="btn btn-primary" id="affinity-distribute-btn" style="width:100%;font-size:.76rem;padding:6px 10px" onclick="affinityAutoDistribute()" disabled>
+                &#x1F4CA; Auto-Distribute SRs
+              </button>
+              <div id="affinity-distribute-result" style="display:none;margin-top:5px;font-size:.74rem;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:5px;padding:6px;color:#1b5e20"></div>
+            </div>
+          </div>
+
+          <!-- Step 4: Execute Allocation -->
+          <div id="affinity-step-4" style="padding:5px 0;border-bottom:1px solid #bbdefb;display:flex;align-items:flex-start;gap:7px">
+            <div id="affinity-step-4-icon" style="width:20px;height:20px;border-radius:50%;background:#90a4ae;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">4</div>
+            <div style="flex:1">
+              <div style="font-size:.78rem;font-weight:600;color:#0d47a1">Execute Allocation</div>
+              <div style="font-size:.72rem;color:#546e7a;margin-bottom:5px">Run affinity-based allocation with density optimization and earnings balancing</div>
+              <button class="btn btn-primary" id="affinity-allocate-btn" style="width:100%;font-size:.76rem;padding:6px 10px;background:#1b8a3c;border:2px solid #155d2a" onclick="affinityExecuteAllocation()" disabled>
+                &#x26A1; Execute Affinity Allocation
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 5: View Results -->
+          <div id="affinity-step-5" style="padding:5px 0;display:flex;align-items:flex-start;gap:7px">
+            <div id="affinity-step-5-icon" style="width:20px;height:20px;border-radius:50%;background:#90a4ae;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">5</div>
+            <div style="flex:1">
+              <div style="font-size:.78rem;font-weight:600;color:#0d47a1">View Results</div>
+              <div style="font-size:.72rem;color:#546e7a;margin-bottom:5px">Review allocation summary, SR assignments, and earnings metrics</div>
+              <div id="affinity-results-summary" style="display:none"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="affinity-info" class="banner info" style="margin-top:4px;display:block">
+          Select a date and ensure SRs are marked present in the Attendance section before proceeding.
+        </div>
+        <div id="affinity-error" class="banner error" style="margin-top:4px"></div>
+      </div>
     </div>
 
     <!-- Attendance -->
@@ -656,6 +741,266 @@ function loadConfig() {
     });
 }
 
+// ── MODE SWITCHING ────────────────────────────────────────────────────────────
+/**
+ * Switch between Standard Routing and Affinity Mode
+ */
+function switchAllocationMode(mode) {
+  var standardBtn = document.getElementById('mode-standard-btn');
+  var affinityBtn = document.getElementById('mode-affinity-btn');
+  var standardWorkflow = document.getElementById('standard-workflow');
+  var affinityWorkflow = document.getElementById('affinity-workflow');
+  
+  // Store mode in sessionStorage
+  sessionStorage.setItem('allocationMode', mode);
+  
+  if (mode === 'affinity') {
+    // Switch to Affinity Mode
+    standardBtn.style.background = '#e9ecef';
+    standardBtn.style.color = '#495057';
+    standardBtn.style.border = '1px solid #ced4da';
+    affinityBtn.style.background = '#1976d2';
+    affinityBtn.style.color = '#fff';
+    affinityBtn.style.border = 'none';
+    
+    // Show affinity workflow, hide standard workflow
+    standardWorkflow.style.display = 'none';
+    affinityWorkflow.style.display = 'block';
+    
+    // Sync date selector
+    var standardDate = document.getElementById('date-select').value;
+    var affinityDateSelect = document.getElementById('affinity-date-select');
+    if (standardDate && affinityDateSelect) {
+      affinityDateSelect.value = standardDate;
+    }
+  } else {
+    // Switch to Standard Mode
+    standardBtn.style.background = '#1976d2';
+    standardBtn.style.color = '#fff';
+    standardBtn.style.border = 'none';
+    affinityBtn.style.background = '#e9ecef';
+    affinityBtn.style.color = '#495057';
+    affinityBtn.style.border = '1px solid #ced4da';
+    
+    // Show standard workflow, hide affinity workflow
+    standardWorkflow.style.display = 'block';
+    affinityWorkflow.style.display = 'none';
+    
+    // Sync date selector
+    var affinityDate = document.getElementById('affinity-date-select').value;
+    var standardDateSelect = document.getElementById('date-select');
+    if (affinityDate && standardDateSelect) {
+      standardDateSelect.value = affinityDate;
+    }
+  }
+}
+
+/**
+ * Open Affinity Map page with current date and hub context
+ */
+function openAffinityMap() {
+  var date = document.getElementById('affinity-date-select').value;
+  
+  if (!date) {
+    showAllocError('Please select a date first before opening Affinity Map.');
+    return;
+  }
+  
+  // Check if SRs are marked present
+  if (presentSrNames.length === 0) {
+    if (!confirm('No SRs are marked as present. Continue anyway?')) {
+      return;
+    }
+  }
+  
+  // Store current date and hub in sessionStorage for affinity page
+  sessionStorage.setItem('selectedDate', date);
+  sessionStorage.setItem('hubName', lastHubName || 'PNQ HDP');
+  sessionStorage.setItem('allocationMode', 'affinity');
+  
+  // Navigate to affinity map page
+  window.location.href = 'affinity-map.html';
+}
+
+// ── AFFINITY MODE WORKFLOW FUNCTIONS ─────────────────────────────────────────
+
+/**
+ * Auto-distribute present SRs across affinity regions based on shipment density.
+ * Calls POST /api/affinity/auto-distribute with present SR names and current regions.
+ */
+function affinityAutoDistribute() {
+  var date = document.getElementById('affinity-date-select').value;
+  if (!date) {
+    showAffinityError('Please select a date first.');
+    return;
+  }
+  if (presentSrNames.length === 0) {
+    showAffinityError('No SRs are marked as present. Please mark SRs present in the Attendance section.');
+    return;
+  }
+
+  var btn = document.getElementById('affinity-distribute-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Distributing...';
+  hideAffinityError();
+
+  // First analyze regions from shipments, then auto-distribute
+  fetch('/api/affinity/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date: date, hubName: lastHubName || 'PNQ HDP', shipments: [] })
+  })
+  .then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw new Error(e.message || 'Analyze failed'); }); })
+  .then(function(report) {
+    var regions = report.regions || [];
+    return fetch('/api/affinity/auto-distribute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regions: regions, presentSRs: presentSrNames })
+    });
+  })
+  .then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw new Error(e.message || 'Auto-distribute failed'); }); })
+  .then(function(config) {
+    var assignmentCount = config.srRegionAssignments ? config.srRegionAssignments.length : 0;
+    var resultDiv = document.getElementById('affinity-distribute-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '&#x2705; ' + assignmentCount + ' SR assignments created across regions. Proceed to Execute Allocation.';
+
+    // Store config in sessionStorage for use in execute step
+    sessionStorage.setItem('affinityConfig', JSON.stringify(config));
+
+    // Update step icons
+    updateAffinityStepIcon(3, true);
+
+    // Enable allocate button
+    document.getElementById('affinity-allocate-btn').disabled = false;
+
+    btn.disabled = false;
+    btn.innerHTML = '&#x1F4CA; Auto-Distribute SRs';
+  })
+  .catch(function(err) {
+    showAffinityError('Auto-distribute failed: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '&#x1F4CA; Auto-Distribute SRs';
+  });
+}
+
+/**
+ * Execute affinity allocation using the current configuration.
+ * Calls POST /api/affinity/execute and displays results summary.
+ */
+function affinityExecuteAllocation() {
+  var date = document.getElementById('affinity-date-select').value;
+  if (!date) {
+    showAffinityError('Please select a date first.');
+    return;
+  }
+
+  var configJson = sessionStorage.getItem('affinityConfig');
+  if (!configJson) {
+    showAffinityError('No SR distribution found. Please run Auto-Distribute SRs first.');
+    return;
+  }
+
+  var btn = document.getElementById('affinity-allocate-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Allocating...';
+  hideAffinityError();
+
+  var config;
+  try { config = JSON.parse(configJson); } catch(e) {
+    showAffinityError('Invalid configuration data. Please re-run Auto-Distribute SRs.');
+    btn.disabled = false;
+    btn.innerHTML = '&#x26A1; Execute Affinity Allocation';
+    return;
+  }
+
+  fetch('/api/affinity/execute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      date: date,
+      hubName: lastHubName || 'PNQ HDP',
+      config: config,
+      regions: []
+    })
+  })
+  .then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw new Error(e.message || 'Allocation failed'); }); })
+  .then(function(result) {
+    var metrics = result.metrics || {};
+    var totalSRs = metrics.totalSrs || 0;
+    var totalShipments = metrics.totalShipments || 0;
+    var variance = metrics.earningsVariance != null ? (metrics.earningsVariance * 100).toFixed(1) : 'N/A';
+
+    // Show results summary in Step 5
+    var summaryDiv = document.getElementById('affinity-results-summary');
+    summaryDiv.style.display = 'block';
+    summaryDiv.innerHTML =
+      '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;padding:8px 10px;font-size:.78rem">' +
+        '<div style="font-weight:700;color:#1b5e20;margin-bottom:5px">&#x2705; Allocation Complete</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">' +
+          '<div><span style="color:#555">SRs:</span> <strong>' + totalSRs + '</strong></div>' +
+          '<div><span style="color:#555">Shipments:</span> <strong>' + totalShipments + '</strong></div>' +
+          '<div><span style="color:#555">Earnings Variance:</span> <strong>' + variance + '%</strong></div>' +
+        '</div>' +
+      '</div>';
+
+    // Update step icons
+    updateAffinityStepIcon(4, true);
+    updateAffinityStepIcon(5, true);
+
+    btn.disabled = false;
+    btn.innerHTML = '&#x26A1; Execute Affinity Allocation';
+  })
+  .catch(function(err) {
+    showAffinityError('Allocation failed: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '&#x26A1; Execute Affinity Allocation';
+  });
+}
+
+/**
+ * Update the step icon for a given affinity workflow step.
+ * @param {number} stepNum - Step number (1-5)
+ * @param {boolean} complete - Whether the step is complete
+ */
+function updateAffinityStepIcon(stepNum, complete) {
+  var icon = document.getElementById('affinity-step-' + stepNum + '-icon');
+  if (icon) {
+    icon.style.background = complete ? '#43a047' : '#90a4ae';
+  }
+}
+
+/**
+ * Show an error message in the affinity workflow section.
+ */
+function showAffinityError(msg) {
+  var el = document.getElementById('affinity-error');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+
+/**
+ * Hide the affinity error banner.
+ */
+function hideAffinityError() {
+  var el = document.getElementById('affinity-error');
+  if (el) { el.style.display = 'none'; }
+}
+
+// ── MODE SWITCHING ────────────────────────────────────────────────────────────
+/**
+ * Initialize mode from sessionStorage on page load
+ */
+function initAllocationMode() {
+  var savedMode = sessionStorage.getItem('allocationMode');
+  if (savedMode === 'affinity') {
+    switchAllocationMode('affinity');
+  } else {
+    // Default to standard mode
+    switchAllocationMode('standard');
+  }
+}
+
 // ── HUB BOUNDARY ──────────────────────────────────────────────────────────────
 /**
  * Fire-and-forget: fetch hub boundary from backend proxy and draw on map.
@@ -929,13 +1274,42 @@ function populateDateSelector(dates) {
     var o = document.createElement('option'); o.value = d; o.textContent = d;
     if (d === cur) o.selected = true; sel.appendChild(o);
   });
+  
+  // Also populate affinity date selector
+  var affinitySel = document.getElementById('affinity-date-select');
+  if (affinitySel) {
+    var affinityCur = affinitySel.value;
+    affinitySel.innerHTML = '<option value="">-- Select date --</option>';
+    dates.forEach(function(d) {
+      var o = document.createElement('option'); o.value = d; o.textContent = d;
+      if (d === affinityCur) o.selected = true; affinitySel.appendChild(o);
+    });
+  }
 }
 
 function selectDate(date) {
   var sel = document.getElementById('date-select'), found = false;
   for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === date) { found = true; break; } }
   if (!found) { var o = document.createElement('option'); o.value = date; o.textContent = date; sel.appendChild(o); }
-  sel.value = date; onDateChange();
+  sel.value = date; 
+  
+  // Also update affinity date selector
+  var affinitySel = document.getElementById('affinity-date-select');
+  if (affinitySel) {
+    var affinityFound = false;
+    for (var i = 0; i < affinitySel.options.length; i++) { 
+      if (affinitySel.options[i].value === date) { affinityFound = true; break; } 
+    }
+    if (!affinityFound) { 
+      var o = document.createElement('option'); 
+      o.value = date; 
+      o.textContent = date; 
+      affinitySel.appendChild(o); 
+    }
+    affinitySel.value = date;
+  }
+  
+  onDateChange();
 }
 
 function onDateChange() {
@@ -1082,8 +1456,7 @@ function renderSummary(s) {
     '<div class="stat-box" style="' + (us > 0 ? 'border-color:#ef9a9a' : '') + '"><div class="val" style="' + (us > 0 ? 'color:#c62828' : '') + '">' + us + '</div><div class="lbl">Unallocated</div></div>' +
     sb(s.totalSrs, 'SRs Active') +
     sb(s.capacityRangeMin != null && s.capacityRangeMax != null ? s.capacityRangeMin + '–' + s.capacityRangeMax : (s.capacityRangeMax || '-'), 'Cap/SR') +
-    sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR') +
-    sb(s.fairnessVariance !== undefined ? s.fairnessVariance.toFixed(3) : '-', 'Fairness Var');
+    sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR');
 
   // ── Earnings fairness panel (CEO view) ─────────────────────────────────────
   var earningsHtml = '';
@@ -1100,13 +1473,21 @@ function renderSummary(s) {
                     : nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
     var range   = s.earningsRange !== undefined ? s.earningsRange : (highest.net - lowest.net);
 
+    // Calculate percentage of SRs within 10% of average
+    var threshold = mean * 0.10; // 10% of mean
+    var srsWithin10Percent = nets.filter(function(sr) {
+      return Math.abs(sr.net - mean) <= threshold;
+    }).length;
+    var percentageWithin10 = (srsWithin10Percent / nets.length) * 100;
+
     earningsHtml =
       '<div style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
       '<div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:7px">&#x1F4B0; Earnings Fairness (Net = Payout &minus; Fuel)</div>' +
-      '<div class="summary-stats" style="grid-template-columns:1fr 1fr 1fr">' +
+      '<div class="summary-stats" style="grid-template-columns:1fr 1fr 1fr 1fr">' +
         earningsBox('&#x2B06; ' + esc(highest.name), '&#x20B9;' + highest.net.toFixed(2), 'Highest Earner', '#1b5e20', '#e8f5e9', '#a5d6a7') +
         earningsBox('&#x2B07; ' + esc(lowest.name),  '&#x20B9;' + lowest.net.toFixed(2),  'Lowest Earner',  '#b71c1c', '#ffebee', '#ef9a9a') +
         earningsBox('&#x2248; Mean', '&#x20B9;' + mean.toFixed(2), 'Avg Net Earnings', '#0d47a1', '#e3f2fd', '#90caf9') +
+        earningsBox('&#x1F4CA; ' + percentageWithin10.toFixed(1) + '%', srsWithin10Percent + ' of ' + nets.length + ' SRs', 'Within 10% of Avg', '#6a1b9a', '#f3e5f5', '#ce93d8') +
       '</div>' +
       '<div style="margin-top:7px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 10px;font-size:.78rem">' +
         '<span style="font-weight:700;color:#e65100">Earnings Range: &#x20B9;' + range.toFixed(2) + '</span>' +
@@ -1780,6 +2161,7 @@ function lmConfirmAll() {
 window.addEventListener('load', function() {
   initMap();
   initUpload();
+  initAllocationMode();
 
   document.getElementById('run-osm-btn').addEventListener('click', function() { runAllocation('osm'); });
   document.getElementById('run-google-btn').addEventListener('click', function() { runAllocation('google'); });
@@ -1787,6 +2169,12 @@ window.addEventListener('load', function() {
   document.getElementById('undo-btn').addEventListener('click', undoOverride);
   document.getElementById('finalize-btn').addEventListener('click', finalizeAllocation);
   document.getElementById('date-select').addEventListener('change', onDateChange);
+  document.getElementById('affinity-date-select').addEventListener('change', function() {
+    // Sync with standard date selector
+    var date = document.getElementById('affinity-date-select').value;
+    document.getElementById('date-select').value = date;
+    onDateChange();
+  });
   document.getElementById('modal-cancel-btn').addEventListener('click', function() {
     document.getElementById('override-modal').close();
   });

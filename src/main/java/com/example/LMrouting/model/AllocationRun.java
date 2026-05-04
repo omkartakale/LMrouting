@@ -22,4 +22,12 @@ public class AllocationRun {
     private double earningsRange;
     private LocalDateTime createdAt;
     private LocalDateTime finalizedAt;
+    
+    // Affinity mode fields
+    /** Allocation mode: STANDARD or AFFINITY */
+    private AllocationMode allocationMode;
+    /** Reference to the affinity configuration used (null for STANDARD mode) */
+    private Long affinityConfigurationId;
+    /** Percentage of shipments assigned outside their affinity regions (null for STANDARD mode) */
+    private Double crossRegionPercentage;
 }

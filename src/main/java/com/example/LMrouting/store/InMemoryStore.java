@@ -1,6 +1,8 @@
 package com.example.LMrouting.store;
 
+import com.example.LMrouting.model.AffinityConfiguration;
 import com.example.LMrouting.model.AllocationRun;
+import com.example.LMrouting.model.AuditLog;
 import com.example.LMrouting.model.OverrideAudit;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.model.SrAttendanceRecord;
@@ -41,6 +43,14 @@ public class InMemoryStore {
     // ── Override Audits ───────────────────────────────────────────────────────
     private final List<OverrideAudit> overrideAudits = Collections.synchronizedList(new ArrayList<>());
     private final AtomicLong auditIdSeq = new AtomicLong(1);
+
+    // ── Affinity Configurations ───────────────────────────────────────────────
+    // Key: configName → AffinityConfiguration
+    private final Map<String, AffinityConfiguration> affinityConfigurations = new ConcurrentHashMap<>();
+
+    // ── Audit Logs ────────────────────────────────────────────────────────────
+    private final List<AuditLog> auditLogs = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicLong auditLogIdSeq = new AtomicLong(1);
 
     // =========================================================================
     // Shipment operations
@@ -154,6 +164,10 @@ public class InMemoryStore {
         return Optional.ofNullable(allocationRuns.get(date));
     }
 
+    public List<AllocationRun> getAllAllocationRuns() {
+        return new ArrayList<>(allocationRuns.values());
+    }
+
     // =========================================================================
     // Override Audit operations
     // =========================================================================
@@ -174,6 +188,61 @@ public class InMemoryStore {
         return overrideAudits.stream()
                 .filter(a -> date.equals(a.getAllocationDate()) && !a.isUndone())
                 .sorted(Comparator.comparing(OverrideAudit::getOverriddenAt).reversed())
+                .collect(Collectors.toList());
+    }
+
+    // =========================================================================
+    // Affinity Configuration operations
+    // =========================================================================
+
+    public void saveAffinityConfiguration(AffinityConfiguration config) {
+        if (config.getConfigName() == null || config.getConfigName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Configuration name cannot be null or empty");
+        }
+        affinityConfigurations.put(config.getConfigName(), config);
+    }
+
+    public Optional<AffinityConfiguration> findAffinityConfiguration(String configName) {
+        return Optional.ofNullable(affinityConfigurations.get(configName));
+    }
+
+    public void deleteAffinityConfiguration(String configName) {
+        affinityConfigurations.remove(configName);
+    }
+
+    public List<String> findAllAffinityConfigurationNames() {
+        return new ArrayList<>(affinityConfigurations.keySet());
+    }
+
+    public boolean hasAffinityConfiguration(String configName) {
+        return affinityConfigurations.containsKey(configName);
+    }
+
+    // =========================================================================
+    // Audit Log operations
+    // =========================================================================
+
+    public void saveAuditLog(AuditLog auditLog) {
+        if (auditLog.getId() == null) {
+            auditLog.setId(auditLogIdSeq.getAndIncrement());
+        }
+        auditLogs.add(auditLog);
+    }
+
+    public List<AuditLog> findAuditLogsByAllocationRunId(Long allocationRunId) {
+        if (allocationRunId == null) {
+            return Collections.emptyList();
+        }
+        
+        return auditLogs.stream()
+                .filter(log -> allocationRunId.equals(log.getAllocationRunId()))
+                .sorted(Comparator.comparing(AuditLog::getTimestamp))
+                .collect(Collectors.toList());
+    }
+
+    public List<AuditLog> getAllAuditLogs() {
+        return auditLogs.stream()
+                .sorted(Comparator.comparing(AuditLog::getTimestamp))
                 .collect(Collectors.toList());
     }
 }

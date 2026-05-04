@@ -1,7 +1,9 @@
 package com.example.LMrouting.controller;
 
 import com.example.LMrouting.dto.*;
+import com.example.LMrouting.model.AllocationMode;
 import com.example.LMrouting.service.AllocationEngineService;
+import com.example.LMrouting.service.AffinityAllocationEngineService;
 import com.example.LMrouting.service.OverrideManagerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +16,7 @@ import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -27,13 +30,43 @@ public class AllocationController {
     private static final DateTimeFormatter FMT_SLASH = DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ENGLISH);
 
     private final AllocationEngineService allocationEngineService;
+    private final Optional<AffinityAllocationEngineService> affinityAllocationEngineService;
     private final OverrideManagerService overrideManagerService;
 
     @PostMapping
     public ResponseEntity<AllocationSummary> allocate(@RequestBody AllocateRequest request) {
         LocalDate date = parseDate(request.date());
-        AllocationSummary summary = allocationEngineService.allocate(date);
-        return ResponseEntity.ok(summary);
+        
+        // Determine allocation mode (default to STANDARD for backward compatibility)
+        AllocationMode mode = request.allocationMode() != null ? request.allocationMode() : AllocationMode.STANDARD;
+        
+        log.info("AllocationController: allocation requested for date='{}', mode='{}'", request.date(), mode);
+        
+        // Route based on allocation mode
+        if (mode == AllocationMode.AFFINITY) {
+            // Check if affinity service is available
+            if (affinityAllocationEngineService.isEmpty()) {
+                log.error("AllocationController: AFFINITY mode requested but AffinityAllocationEngineService is not available");
+                throw new IllegalStateException(
+                        "Affinity allocation mode is not available. " +
+                        "Please ensure affinity configuration is properly set up or use STANDARD mode.");
+            }
+            
+            log.info("AllocationController: routing to AffinityAllocationEngineService");
+            
+            // For affinity mode, we need additional configuration
+            // This simple endpoint doesn't support full affinity configuration
+            // Users should use the /api/affinity/execute endpoint for full affinity allocation
+            throw new IllegalArgumentException(
+                    "Affinity mode allocation requires additional configuration. " +
+                    "Please use the /api/affinity/execute endpoint with a complete affinity configuration, " +
+                    "or use STANDARD mode for this endpoint.");
+        } else {
+            // STANDARD mode - use existing allocation engine
+            log.info("AllocationController: routing to AllocationEngineService (STANDARD mode)");
+            AllocationSummary summary = allocationEngineService.allocate(date);
+            return ResponseEntity.ok(summary);
+        }
     }
 
     @GetMapping("/{date}/summary")
