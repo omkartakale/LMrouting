@@ -215,8 +215,11 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <button class="btn" id="mode-standard-btn" onclick="switchAllocationMode('standard')" style="flex:1;padding:6px 10px;font-size:.78rem;background:#1976d2;color:#fff;border:none">
           &#x1F6E3; Standard Routing
         </button>
-        <button class="btn" id="mode-affinity-btn" onclick="switchAllocationMode('affinity')" style="flex:1;padding:6px 10px;font-size:.78rem;background:#e9ecef;color:#495057;border:1px solid #ced4da">
-          &#x1F5FA; Affinity Mode
+        <button class="btn" id="mode-affinity-btn" onclick="runAffinityAllocation()" style="flex:1;padding:6px 10px;font-size:.78rem;background:#e9ecef;color:#495057;border:1px solid #ced4da">
+          🎯 Affinity Mode
+        </button>
+        <button class="btn" id="mode-previous-btn" onclick="loadPreviousAllocation()" style="flex:1;padding:6px 10px;font-size:.72rem;background:#e9ecef;color:#495057;border:1px solid #ced4da">
+          📊 Previous
         </button>
       </div>
       
@@ -334,6 +337,23 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
     </div>
 
+    <!-- SR Affinity Panel -->
+    <div class="panel" id="affinity-match-panel" style="display:none">
+      <div class="panel-title">
+        SR Affinity
+        <span class="badge" id="affinity-match-badge" style="background:#8e24aa">0 defined</span>
+      </div>
+      <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">Assign preferred pincodes to SRs. Routes with most shipments in their area get matched.</div>
+      <div id="affinity-match-list" style="max-height:200px;overflow-y:auto;margin-bottom:8px">
+        <div class="empty-text">Select a date and load attendance first</div>
+      </div>
+      <div style="display:flex;gap:5px">
+        <button class="btn btn-primary" style="flex:1;font-size:.76rem" onclick="runAffinityAllocation()">🎯 Run with Affinity</button>
+        <button class="btn btn-secondary" style="font-size:.76rem" onclick="clearAllAffinities()">Clear</button>
+      </div>
+      <div id="affinity-match-result" style="margin-top:6px"></div>
+    </div>
+
     <!-- Summary -->
     <div class="panel hidden" id="summary-panel">
       <div class="panel-title">Summary <span id="summary-mode-badge" style="font-size:.7rem;background:#e9ecef;color:#495057;border-radius:10px;padding:1px 7px;font-weight:600"></span></div>
@@ -425,6 +445,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div id="gmap" style="display:none;width:100%;height:100%"></div>
     <button id="fullscreen-btn" onclick="toggleMapFullscreen()" title="Toggle fullscreen map" style="position:absolute;top:10px;left:50px;z-index:10000;background:#fff;color:#333;border:2px solid rgba(0,0,0,.2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.75rem;font-weight:600;box-shadow:none;line-height:1.4">⛶</button>
     <button id="map-toggle-btn" onclick="toggleMapProvider()" title="Switch map provider" style="position:absolute;top:10px;left:90px;z-index:10000;background:#fff;color:#333;border:2px solid rgba(0,0,0,.2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.72rem;font-weight:600;box-shadow:none;line-height:1.4">🗺 Google</button>
+    <button id="pincode-boundary-btn" onclick="togglePincodeBoundaries()" title="Toggle pincode boundaries" style="position:absolute;top:10px;left:160px;z-index:10000;background:#fff;color:#333;border:2px solid rgba(0,0,0,.2);border-radius:4px;padding:4px 8px;cursor:pointer;font-size:.72rem;font-weight:600;box-shadow:none;line-height:1.4;opacity:.6">📍 Show Pincodes</button>
     <div id="compare-banner">&#x1F50D; Comparison Mode: OSM (solid) vs Google Maps (dashed)</div>
     <div id="map-legend">
       <h4 onclick="this.parentElement.classList.toggle('collapsed')">Legend <span class="legend-toggle">▼</span></h4>
@@ -471,6 +492,10 @@ var orsConfigured = false;
 var hubBoundaryLayer = null;
 var hubOriginalBoundaryLayer = null;
 var lastHubName = null;
+
+// Pincode boundary overlays
+var pincodeBoundaryLayers = []; // L.polygon[]
+var pincodeBoundaryVisible = false;
 
 // Google Maps state
 var gmap = null;           // google.maps.Map instance
@@ -1001,6 +1026,60 @@ function initAllocationMode() {
   }
 }
 
+// ── PINCODE BOUNDARIES ─────────────────────────────────────────────────────────
+function togglePincodeBoundaries() {
+  if (pincodeBoundaryVisible) {
+    // Hide
+    pincodeBoundaryLayers.forEach(function(l) { map.removeLayer(l); });
+    pincodeBoundaryVisible = false;
+    var btn = document.getElementById('pincode-boundary-btn');
+    if (btn) { btn.textContent = '📍 Show Pincodes'; btn.style.opacity = '0.6'; }
+    return;
+  }
+
+  if (pincodeBoundaryLayers.length > 0) {
+    // Already loaded, just show
+    pincodeBoundaryLayers.forEach(function(l) { l.addTo(map); });
+    pincodeBoundaryVisible = true;
+    var btn = document.getElementById('pincode-boundary-btn');
+    if (btn) { btn.textContent = '📍 Hide Pincodes'; btn.style.opacity = '1'; }
+    return;
+  }
+
+  // Fetch and render
+  fetch('/api/pincode-boundary')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.loaded || !data.polygons || !data.polygons.length) {
+        showAllocInfo('No pincode boundaries loaded');
+        return;
+      }
+      var colors = ['#1565c0','#2e7d32','#e65100','#6a1b9a','#00838f','#c62828','#4527a0','#00695c','#bf360c','#283593'];
+      data.polygons.forEach(function(p, i) {
+        var color = colors[i % colors.length];
+        p.rings.forEach(function(ring) {
+          var poly = L.polygon(ring, {
+            color: color,
+            weight: 1.5,
+            opacity: 0.6,
+            fillColor: color,
+            fillOpacity: 0.08,
+            interactive: true
+          }).addTo(map);
+          poly.bindTooltip('<span style="font-size:.75rem;font-weight:600">' + p.pincode + '</span>', {
+            sticky: true, direction: 'center', className: ''
+          });
+          pincodeBoundaryLayers.push(poly);
+        });
+      });
+      pincodeBoundaryVisible = true;
+      var btn = document.getElementById('pincode-boundary-btn');
+      if (btn) { btn.textContent = '📍 Hide Pincodes (' + data.pincodeCount + ')'; btn.style.opacity = '1'; }
+      showAllocInfo('Loaded ' + data.pincodeCount + ' pincode boundaries');
+    })
+    .catch(function(e) { showAllocError('Failed to load pincode boundaries: ' + e.message); });
+}
+
 // ── HUB BOUNDARY ──────────────────────────────────────────────────────────────
 /**
  * Fire-and-forget: fetch hub boundary from backend proxy and draw on map.
@@ -1329,7 +1408,7 @@ function loadAttendance(date) {
   list.innerHTML = '<div class="loading-text">Loading attendance...</div>';
   fetch('/api/attendance/' + encodeURIComponent(date))
     .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-    .then(function(data) { renderAttendance(data); })
+    .then(function(data) { renderAttendance(data); showAffinityPanel(); })
     .catch(function(e) { list.innerHTML = '<div class="loading-text" style="color:#c62828">Failed: ' + esc(e.message) + '</div>'; });
 }
 
@@ -1858,6 +1937,256 @@ function clearAllocationUI() {
   if (hubBoundaryLayer && lastHubName) {
     updateBoundaryLegend(lastHubName, lastHubName, true);
   }
+}
+
+// ── SR AFFINITY MATCHING ───────────────────────────────────────────────────────
+var srAffinityMap = {}; // { srName: [pincode1, pincode2, ...] }
+var availablePincodes = []; // [{ pincode, count }]
+
+function showAffinityPanel() {
+  document.getElementById('affinity-match-panel').style.display = 'block';
+  loadAvailablePincodes();
+  renderAffinityList();
+}
+
+function loadAvailablePincodes() {
+  var date = document.getElementById('date-select').value;
+  if (!date) return;
+  fetch('/api/affinity-match/' + encodeURIComponent(date) + '/pincodes')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      availablePincodes = data.pincodes || [];
+      renderAffinityList();
+    })
+    .catch(function() {});
+}
+
+function renderAffinityList() {
+  var container = document.getElementById('affinity-match-list');
+  if (!presentSrNames || !presentSrNames.length) {
+    container.innerHTML = '<div class="empty-text">Mark SRs present first</div>';
+    return;
+  }
+
+  var h = '';
+  presentSrNames.forEach(function(sr, i) {
+    var color = SR_COLORS[i % SR_COLORS.length];
+    var pins = srAffinityMap[sr] || [];
+    h += '<div style="display:flex;align-items:center;gap:4px;padding:4px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
+    h += '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>';
+    h += '<div style="min-width:50px;font-weight:600">' + esc(sr) + '</div>';
+    h += '<input class="lm-sr-input" data-sr="' + esc(sr) + '" placeholder="Pincodes (comma-sep)" value="' + esc(pins.join(',')) + '" style="flex:1;font-size:.72rem;padding:2px 4px" onchange="updateSrAffinity(this)"/>';
+    h += '<span style="font-size:.65rem;color:#6c757d">' + pins.length + '</span>';
+    h += '</div>';
+  });
+  container.innerHTML = h;
+  updateAffinityBadge();
+}
+
+function updateSrAffinity(input) {
+  var sr = input.getAttribute('data-sr');
+  var val = input.value.trim();
+  if (val) {
+    srAffinityMap[sr] = val.split(',').map(function(p) { return p.trim(); }).filter(function(p) { return p; });
+  } else {
+    delete srAffinityMap[sr];
+  }
+  updateAffinityBadge();
+}
+
+function updateAffinityBadge() {
+  var count = Object.keys(srAffinityMap).filter(function(k) { return srAffinityMap[k] && srAffinityMap[k].length > 0; }).length;
+  document.getElementById('affinity-match-badge').textContent = count + ' defined';
+}
+
+function clearAllAffinities() {
+  srAffinityMap = {};
+  fetch('/api/affinity-match/clear', { method: 'DELETE' }).catch(function() {});
+  renderAffinityList();
+  document.getElementById('affinity-match-result').innerHTML = '';
+}
+
+function runAffinityAllocation() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Select a date first.'); return; }
+
+  // Send affinities to backend
+  var affinities = {};
+  for (var sr in srAffinityMap) {
+    if (srAffinityMap[sr] && srAffinityMap[sr].length > 0) {
+      affinities[sr] = srAffinityMap[sr];
+    }
+  }
+
+  // Step 1: Set affinities
+  fetch('/api/affinity-match/set', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ affinities: affinities })
+  })
+  .then(function() {
+    // Step 2: Run allocation with affinity
+    return fetch('/api/affinity-match/allocate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: date })
+    });
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.error) { showAllocError(data.error); return; }
+
+    var summary = data.allocationSummary;
+    if (summary) {
+      document.getElementById('summary-mode-badge').textContent = data.mode === 'affinity' ? 'Affinity' : 'Standard';
+      document.getElementById('summary-mode-badge').style.background = data.mode === 'affinity' ? '#8e24aa' : '#1976d2';
+      renderSummary(summary);
+      renderSrList(summary.srSummaries);
+      lmShowPanel(summary.srSummaries);
+      renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode || 'osm');
+    }
+
+    // Show affinity scores
+    var scores = data.affinityScores;
+    if (scores) {
+      var resHtml = '<div class="result-card info" style="font-size:.74rem">';
+      resHtml += '<div style="font-weight:700;margin-bottom:4px">Affinity Match Results</div>';
+      for (var sr in scores) {
+        var s = scores[sr];
+        var icon = s.affinityPct > 50 ? '✅' : (s.affinityPct > 0 ? '⚠️' : '➖');
+        resHtml += '<div>' + icon + ' <b>' + esc(sr) + '</b>: ' + s.affinityShipments + '/' + s.totalShipments + ' in affinity area (' + s.affinityPct + '%)</div>';
+      }
+      resHtml += '</div>';
+      document.getElementById('affinity-match-result').innerHTML = resHtml;
+    }
+
+    showAllocInfo('Affinity allocation complete: ' + data.affinitySRs + ' SRs with affinity, ' + data.totalSRs + ' total');
+  })
+  .catch(function(e) { showAllocError('Affinity allocation failed: ' + e.message); });
+}
+
+// Show affinity panel when attendance loads
+var _origLoadAttendance = typeof loadAttendance === 'function' ? loadAttendance : null;
+
+// ── PREVIOUS ALLOCATION ────────────────────────────────────────────────────────
+function loadPreviousAllocation() {
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Select a date first.'); return; }
+
+  var btn = document.getElementById('mode-previous-btn');
+  btn.style.background = '#e65100';
+  btn.style.color = '#fff';
+  btn.innerHTML = '<span class="spinner"></span> Loading...';
+
+  // Reset other mode buttons
+  document.getElementById('mode-standard-btn').style.background = '#e9ecef';
+  document.getElementById('mode-standard-btn').style.color = '#495057';
+  document.getElementById('mode-affinity-btn').style.background = '#e9ecef';
+  document.getElementById('mode-affinity-btn').style.color = '#495057';
+
+  fetch('/api/previous/' + encodeURIComponent(date) + '/summary')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.innerHTML = '📊 Previous';
+      if (data.error) { showAllocError(data.error); btn.style.background = '#e9ecef'; btn.style.color = '#495057'; return; }
+
+      clearAllocationUI();
+
+      // Show summary panel
+      document.getElementById('summary-panel').classList.remove('hidden');
+      document.getElementById('summary-mode-badge').textContent = 'Previous (Original)';
+      document.getElementById('summary-mode-badge').style.background = '#e65100';
+
+      var us = data.unallocatedShipments || 0;
+      var statsHtml = sb(data.totalShipments, 'Total') +
+        sb(data.allocatedShipments, 'Allocated') +
+        '<div class="stat-box" style="' + (us > 0 ? 'border-color:#ef9a9a' : '') + '"><div class="val" style="' + (us > 0 ? 'color:#c62828' : '') + '">' + us + '</div><div class="lbl">Unallocated</div></div>' +
+        sb(data.totalSrs, 'SRs') +
+        sb('₹' + (data.meanEarnings || 0).toFixed(0), 'Mean Earnings') +
+        sb('₹' + (data.earningsRange || 0).toFixed(0), 'Earnings Range') +
+        sb((data.within10PctPct || 0) + '%', 'Within 10% Avg');
+      document.getElementById('summary-stats').innerHTML = statsHtml;
+
+      // Show SR list
+      if (data.srSummaries && data.srSummaries.length) {
+        document.getElementById('sr-list-panel').classList.remove('hidden');
+        var list = document.getElementById('sr-list');
+        var legendItems = document.getElementById('legend-items');
+        legendItems.innerHTML = '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
+
+        var h = '';
+        data.srSummaries.forEach(function(sr, i) {
+          var color = SR_COLORS[i % SR_COLORS.length];
+          legendItems.innerHTML += '<div class="legend-item"><div class="legend-dot" style="background:' + color + '"></div>' + esc(sr.srName) + ' (' + sr.shipmentCount + ')</div>';
+          var dist = sr.estimatedDistanceKm ? sr.estimatedDistanceKm.toFixed(1) + ' km' : '';
+          var net = sr.netEarnings ? '₹' + sr.netEarnings.toFixed(0) : '';
+          h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectPreviousSr(\'' + esc(sr.srName) + '\',' + i + ')">';
+          h += '<div class="sr-dot" style="background:' + color + '"></div>';
+          h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
+          h += '<div class="sr-item-sub">' + dist + (net ? ' | Net: ' + net : '') + '</div></div>';
+          h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
+        });
+        list.innerHTML = h;
+
+        // Render markers on map
+        renderPreviousOnMap(data.srSummaries, date);
+      }
+
+      showAllocInfo('Previous allocation loaded: ' + data.totalSrs + ' SRs, ' + data.allocatedShipments + ' shipments. Earnings range: ₹' + (data.earningsRange || 0).toFixed(0));
+    })
+    .catch(function(e) {
+      btn.innerHTML = '📊 Previous';
+      btn.style.background = '#e9ecef';
+      btn.style.color = '#495057';
+      showAllocError('Failed to load previous allocation: ' + e.message);
+    });
+}
+
+function renderPreviousOnMap(srSummaries, date) {
+  clearMarkers();
+  var i = 0;
+  function next() {
+    if (i >= srSummaries.length) {
+      if (activeMapProvider === 'google') syncToGoogleMap();
+      return;
+    }
+    var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
+    fetch('/api/previous/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(sr.srName))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(route) {
+        if (!route) { next(); return; }
+        if (!srLayers[sr.srName]) {
+          srLayers[sr.srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: idx };
+        }
+        addMarkersForSr(sr.srName, route, color, idx, date);
+        // Straight-line polyline (no Google routing for previous)
+        var stops = srLayers[sr.srName].markers.map(function(m) { return m.getLatLng(); });
+        if (stops.length) {
+          var path = [[HUB_LAT, HUB_LNG]].concat(stops.map(function(ll) { return [ll.lat, ll.lng]; })).concat([[HUB_LAT, HUB_LNG]]);
+          var polyline = L.polyline(path, { color: color, weight: 2.5, opacity: 0.6, dashArray: '6,4' }).addTo(map);
+          srLayers[sr.srName].osmPolyline = polyline;
+        }
+        next();
+      })
+      .catch(function() { next(); });
+  }
+  next();
+}
+
+function selectPreviousSr(srName, index) {
+  currentSrName = srName; currentSrIndex = index;
+  document.querySelectorAll('.sr-item').forEach(function(el) { el.classList.toggle('active', el.getAttribute('data-sr') === srName); });
+  var layer = srLayers[srName];
+  if (layer && layer.markers.length) { map.fitBounds(L.featureGroup(layer.markers).getBounds().pad(0.15)); }
+  var date = document.getElementById('date-select').value;
+  document.getElementById('route-panel').classList.remove('hidden');
+  document.getElementById('route-panel-title').textContent = 'Previous Route: ' + srName;
+  document.getElementById('route-stats').innerHTML = '<div class="loading-text">Loading...</div>';
+  document.getElementById('stop-list').innerHTML = '';
+  fetch('/api/previous/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(srName))
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(route) { renderRouteDetails(route, SR_COLORS[index % SR_COLORS.length]); })
+    .catch(function(e) { document.getElementById('route-stats').innerHTML = '<div class="loading-text" style="color:#c62828">Error: ' + esc(e.message) + '</div>'; });
 }
 
 // ── LM INTEGRATION ────────────────────────────────────────────────────────────

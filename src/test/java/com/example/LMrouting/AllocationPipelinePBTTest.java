@@ -34,7 +34,8 @@ class AllocationPipelinePBTTest {
 
         InMemoryStore storeMock = Mockito.mock(InMemoryStore.class);
         HubBoundaryService hubBoundaryService = Mockito.mock(HubBoundaryService.class);
-        AllocationEngineService service = new AllocationEngineService(storeMock, routeOptimizer, weights, hubBoundaryService);
+        PincodeBoundaryService pincodeBoundaryService = Mockito.mock(PincodeBoundaryService.class);
+        AllocationEngineService service = new AllocationEngineService(storeMock, routeOptimizer, weights, hubBoundaryService, pincodeBoundaryService);
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);
         setField(service, "rebalancingThreshold", THRESHOLD);

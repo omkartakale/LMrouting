@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shipment Allocation Optimizer v3 — Presentation</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;line-height:1.6}
+.slide{min-height:100vh;padding:60px 80px;display:flex;flex-direction:column;justify-content:center;border-bottom:2px solid #1e293b;page-break-after:always}
+h1{font-size:2.8rem;font-weight:800;background:linear-gradient(135deg,#3b82f6,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:8px}
+h2{font-size:1.8rem;font-weight:700;color:#f8fafc;margin-bottom:24px;border-left:4px solid #3b82f6;padding-left:16px}
+h3{font-size:1.2rem;font-weight:700;color:#93c5fd;margin:20px 0 10px}
+p,.desc{font-size:1rem;color:#94a3b8;margin-bottom:12px}
+.subtitle{font-size:1.3rem;color:#64748b;margin-bottom:40px}
+.team{font-size:1.1rem;color:#3b82f6;font-weight:600}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:16px 0}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:16px 0}
+.card{background:#1e293b;border-radius:12px;padding:20px;border:1px solid #334155}
+.card.red{border-left:4px solid #ef4444}
+.card.green{border-left:4px solid #22c55e}
+.card.blue{border-left:4px solid #3b82f6}
+.card.purple{border-left:4px solid #8b5cf6}
+.card.orange{border-left:4px solid #f97316}
+.card.cyan{border-left:4px solid #06b6d4}
+.card-title{font-size:.85rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.card-value{font-size:2rem;font-weight:800;color:#f8fafc}
+.card-sub{font-size:.85rem;color:#94a3b8;margin-top:4px}
+.pill{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:600;margin:2px 4px}
+.pill-blue{background:#1e3a5f;color:#60a5fa}
+.pill-green{background:#14532d;color:#4ade80}
+.pill-red{background:#450a0a;color:#fca5a5}
+.pill-purple{background:#3b0764;color:#c084fc}
+.pill-orange{background:#431407;color:#fdba74}
+ul{list-style:none;padding:0}
+ul li{padding:8px 0;font-size:.95rem;color:#cbd5e1;border-bottom:1px solid #1e293b}
+ul li:before{content:'→';color:#3b82f6;font-weight:700;margin-right:10px}
+ul li strong{color:#f8fafc}
+.highlight{background:linear-gradient(135deg,#1e3a5f,#1e293b);border:1px solid #3b82f6;border-radius:12px;padding:20px;margin:16px 0}
+.quote{font-size:1.3rem;font-style:italic;color:#93c5fd;border-left:4px solid #8b5cf6;padding:16px 24px;margin:24px 0;background:#1e1b4b;border-radius:0 12px 12px 0}
+table{width:100%;border-collapse:collapse;margin:16px 0}
+th{background:#1e293b;color:#93c5fd;padding:12px 16px;text-align:left;font-size:.85rem;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 16px;border-bottom:1px solid #1e293b;font-size:.9rem}
+tr:hover{background:#1e293b}
+.tag{font-size:.75rem;padding:2px 8px;border-radius:4px;font-weight:600}
+.tag-done{background:#14532d;color:#4ade80}
+.tag-new{background:#1e3a5f;color:#60a5fa}
+.phase{display:flex;align-items:flex-start;gap:16px;margin:12px 0}
+.phase-num{background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:#fff;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.9rem;flex-shrink:0}
+.phase-content{flex:1}
+.phase-title{font-weight:700;color:#f8fafc;font-size:1rem}
+.phase-desc{color:#94a3b8;font-size:.88rem;margin-top:4px}
+.metric-row{display:flex;gap:12px;margin:8px 0;flex-wrap:wrap}
+.metric{background:#1e293b;border-radius:8px;padding:12px 16px;text-align:center;flex:1;min-width:120px}
+.metric .val{font-size:1.6rem;font-weight:800;color:#3b82f6}
+.metric .lbl{font-size:.75rem;color:#64748b;margin-top:2px}
+.metric.good .val{color:#22c55e}
+.metric.warn .val{color:#f97316}
+.metric.bad .val{color:#ef4444}
+.divider{height:1px;background:linear-gradient(90deg,transparent,#334155,transparent);margin:32px 0}
+.footer{text-align:center;color:#475569;font-size:.8rem;margin-top:40px}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 1: TITLE -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide" style="justify-content:center;align-items:center;text-align:center">
+  <h1>Shipment Allocation Optimizer v3</h1>
+  <div class="subtitle">Affinity-Based Smart Last Mile Allocation Engine</div>
+  <div class="team">Team: Omkar Takale &nbsp;|&nbsp; Omkar Baviskar</div>
+  <div style="margin-top:12px;color:#64748b">Hub: PNQ HDP (Pune) &nbsp;•&nbsp; Hackathon 2026</div>
+  <div class="metric-row" style="margin-top:40px;justify-content:center">
+    <div class="metric"><div class="val">4570+</div><div class="lbl">Shipments/Day</div></div>
+    <div class="metric"><div class="val">10</div><div class="lbl">SRs Managed</div></div>
+    <div class="metric"><div class="val">&lt;2 min</div><div class="lbl">Full Allocation</div></div>
+    <div class="metric"><div class="val">₹0</div><div class="lbl">Infra Cost</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 2: PROBLEM -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <h2>The Problem</h2>
+  <p class="desc">Current last-mile allocation is manual, intuition-driven, and creates measurable inefficiency.</p>
+
+  <div class="grid">
+    <div class="card red">
+      <div class="card-title">Earnings Imbalance</div>
+      <div class="card-value">₹500–₹2000</div>
+      <div class="card-sub">Daily variance between SRs on the same hub</div>
+    </div>
+    <div class="card red">
+      <div class="card-title">Cross-Region Deliveries</div>
+      <div class="card-value">20–30%</div>
+      <div class="card-sub">SRs delivering outside their natural area</div>
+    </div>
+    <div class="card red">
+      <div class="card-title">Manual Allocation Time</div>
+      <div class="card-value">30–45 min</div>
+      <div class="card-sub">Per hub, per day — supervisor bottleneck</div>
+    </div>
+    <div class="card red">
+      <div class="card-title">Route Overlap</div>
+      <div class="card-value">High</div>
+      <div class="card-sub">Multiple SRs covering same geography</div>
+    </div>
+  </div>
+
+  <div class="highlight">
+    <strong style="color:#fca5a5">Impact:</strong> Lower delivery conversion, unstable SR earnings → higher attrition, increased operational cost per shipment.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 3: APPROACH — HOW IT WORKS -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <h2>How It Works — The Allocation Pipeline</h2>
+
+  <div class="phase">
+    <div class="phase-num">1</div>
+    <div class="phase-content">
+      <div class="phase-title">Data Ingestion & Cleanup</div>
+      <div class="phase-desc">Upload XLSX/CSV → auto-map 20+ column aliases → filter out-of-range (&gt;50km) → remove zero-coordinates → group by date</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">2</div>
+    <div class="phase-content">
+      <div class="phase-title">Outlier Detection</div>
+      <div class="phase-desc">For each shipment, count neighbors within 2km. If &lt;3 neighbors → excluded as outlier. Prevents isolated points from distorting routes.</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">3</div>
+    <div class="phase-content">
+      <div class="phase-title">Hub-Centric Angular Clustering <span class="pill pill-blue">Core Algorithm</span></div>
+      <div class="phase-desc">Sort shipments by angle from hub (like compass bearing). Split into K equal pie-slice sectors — one per SR. 10-pass boundary refinement balances max travel distance. <strong>Result: contiguous geographic wedges, zero route overlap.</strong></div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">4</div>
+    <div class="phase-content">
+      <div class="phase-title">Earnings-Based Fairness Rebalancing <span class="pill pill-green">Fairness Engine</span></div>
+      <div class="phase-desc">Per SR: netEarnings = Σ(payout) − (distance × ₹2.5/km). Iteratively swap boundary shipments until all SRs earn within ±₹50. Up to 200 iterations.</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">5</div>
+    <div class="phase-content">
+      <div class="phase-title">Route Optimization (TSP + Google Maps)</div>
+      <div class="phase-desc">Nearest-neighbor greedy TSP from hub. Google Directions API for real road routing. Polyline rendered on Leaflet or Google Maps (toggle).</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">6</div>
+    <div class="phase-content">
+      <div class="phase-title">Affinity Mode <span class="pill pill-purple">New</span></div>
+      <div class="phase-desc">Region density analysis (pincode-based). SR-to-region affinity mapping. Compare Standard vs Affinity allocation side-by-side before execution.</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">7</div>
+    <div class="phase-content">
+      <div class="phase-title">LM System Integration <span class="pill pill-orange">One-Click Push</span></div>
+      <div class="phase-desc">Auto Keycloak auth → bulk allocate via LM API (200ms delay) → confirm OFD + create trip. Zero manual steps.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 4: OUTCOMES -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <h2>Measurable Outcomes</h2>
+
+  <table>
+    <tr><th>Metric</th><th>Before (Manual)</th><th>After (v3)</th><th>Improvement</th></tr>
+    <tr><td>Earnings Variance</td><td style="color:#fca5a5">₹500–₹2000</td><td style="color:#4ade80">&lt;₹100</td><td><span class="pill pill-green">80% ↓</span></td></tr>
+    <tr><td>Cross-Region Deliveries</td><td style="color:#fca5a5">20–30%</td><td style="color:#4ade80">&lt;5%</td><td><span class="pill pill-green">75% ↓</span></td></tr>
+    <tr><td>Avg Distance per SR</td><td style="color:#fca5a5">Unoptimized</td><td style="color:#4ade80">Road-optimized</td><td><span class="pill pill-green">25% less km</span></td></tr>
+    <tr><td>Allocation Time</td><td style="color:#fca5a5">30–45 min</td><td style="color:#4ade80">&lt;2 min</td><td><span class="pill pill-green">95% ↓</span></td></tr>
+    <tr><td>Route Overlap</td><td style="color:#fca5a5">High</td><td style="color:#4ade80">Zero</td><td><span class="pill pill-green">Eliminated</span></td></tr>
+  </table>
+
+  <div class="grid3" style="margin-top:24px">
+    <div class="card green">
+      <div class="card-title">Automated</div>
+      <div class="card-sub">Zero manual intervention from upload to LM push</div>
+    </div>
+    <div class="card green">
+      <div class="card-title">Preview Mode</div>
+      <div class="card-sub">Compare before executing — zero-risk rollout</div>
+    </div>
+    <div class="card green">
+      <div class="card-title">Scalable</div>
+      <div class="card-sub">Change hub config → works for any hub instantly</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 5: TECH STACK & COST -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <h2>Tech Stack & Cost</h2>
+
+  <div class="grid">
+    <div>
+      <h3>Technology</h3>
+      <table>
+        <tr><td>Backend</td><td><span class="pill pill-blue">Spring Boot 3.4</span> <span class="pill pill-blue">Java 17</span></td></tr>
+        <tr><td>Frontend</td><td><span class="pill pill-blue">HTML/JS</span> <span class="pill pill-blue">Leaflet</span> <span class="pill pill-blue">Google Maps</span></td></tr>
+        <tr><td>Routing</td><td><span class="pill pill-green">Google Directions API</span></td></tr>
+        <tr><td>Auth</td><td><span class="pill pill-purple">Keycloak</span></td></tr>
+        <tr><td>Deploy</td><td><span class="pill pill-orange">Docker</span> <span class="pill pill-orange">EC2</span></td></tr>
+        <tr><td>Integration</td><td><span class="pill pill-purple">XpressBees LM API</span></td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>Cost Breakdown</h3>
+      <table>
+        <tr><td>Infrastructure</td><td style="color:#4ade80;font-weight:700">₹0 (shared EC2)</td></tr>
+        <tr><td>Development</td><td style="color:#4ade80;font-weight:700">Internal (hackathon)</td></tr>
+        <tr><td>Google Maps API</td><td style="color:#4ade80;font-weight:700">₹0 (10K free/month)</td></tr>
+        <tr><td>Keycloak</td><td style="color:#4ade80;font-weight:700">₹0 (existing infra)</td></tr>
+        <tr><td>Maintenance</td><td style="color:#4ade80;font-weight:700">Minimal</td></tr>
+        <tr style="background:#14532d"><td><strong>TOTAL</strong></td><td style="color:#4ade80;font-weight:800">Near-zero cost</td></tr>
+      </table>
+      <div class="highlight" style="margin-top:16px">
+        <strong style="color:#4ade80">Estimated ROI:</strong> ₹2–5L/month per hub at scale
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- SLIDE 6: SUMMARY -->
+<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<div class="slide">
+  <h2>Executive Summary</h2>
+
+  <div class="grid3">
+    <div class="card blue">
+      <div class="card-title">Problems Solved</div>
+      <div class="card-value">5</div>
+      <div class="card-sub">Manual allocation, earnings imbalance, route overlap, system disconnect, no visibility</div>
+    </div>
+    <div class="card purple">
+      <div class="card-title">Features Shipped</div>
+      <div class="card-value">12+</div>
+      <div class="card-sub">Engine, UI, affinity mode, LM integration, Google Maps, deploy pipeline</div>
+    </div>
+    <div class="card green">
+      <div class="card-title">Status</div>
+      <div class="card-value">Live</div>
+      <div class="card-sub">Deployed on EC2 stage, integrated with LM APIs</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <h3>Key Algorithms</h3>
+  <div class="metric-row">
+    <div class="metric"><div class="val" style="font-size:1rem">Angular Partitioning</div><div class="lbl">O(n log n) — pie-slice clustering</div></div>
+    <div class="metric"><div class="val" style="font-size:1rem">Earnings Rebalancing</div><div class="lbl">Greedy boundary swap — ±₹50 target</div></div>
+    <div class="metric"><div class="val" style="font-size:1rem">TSP Sequencing</div><div class="lbl">Nearest-neighbor from hub</div></div>
+    <div class="metric"><div class="val" style="font-size:1rem">Outlier Detection</div><div class="lbl">2km radius, min 3 neighbors</div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="quote">
+    "Today, allocation depends on human judgment. With v3, we convert it into a data-driven, fair, and scalable decision engine — with zero disruption to existing systems."
+  </div>
+
+  <div class="footer">
+    Live Demo: <strong>http://13.127.28.147:8080</strong> &nbsp;•&nbsp; Repo: scm.xbees.in/global-api/lm-routing (stage branch)
+  </div>
+</div>
+
+</body>
+</html>

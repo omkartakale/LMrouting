@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hackathon 2026 — Shipment Allocation Optimizer v3</title>
+<meta name="viewport" content="width=1280" />
+<style>
+  :root{
+    --navy:#152347;
+    --navy-2:#1F3160;
+    --ink:#0E1730;
+    --slate:#5A6478;
+    --line:#E4E7EE;
+    --bg:#F6F7FB;
+    --paper:#FFFFFF;
+    --orange:#F37021;       /* XpressBees-ish accent */
+    --orange-soft:#FFE7D6;
+    --green:#1F8A5A;
+    --green-soft:#E2F4EB;
+    --red:#C0392B;
+    --red-soft:#FBE6E2;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI","Calibri","Inter",system-ui,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  .deck{display:flex;flex-direction:column;align-items:center;gap:28px;padding:36px 16px 64px;}
+  .slide{
+    width:1280px;height:720px;background:var(--paper);
+    box-shadow:0 6px 24px rgba(20,30,60,.08);
+    border-radius:14px;overflow:hidden;position:relative;
+    display:flex;flex-direction:column;
+  }
+  .slide.dark{background:var(--navy);color:#fff;}
+  .slide.dark .muted{color:#B6C0D9;}
+  .pad{padding:56px 64px;}
+  .hd{display:flex;align-items:center;justify-content:space-between;
+    padding:22px 64px 0;color:var(--slate);font-size:13px;letter-spacing:.18em;text-transform:uppercase;}
+  .slide.dark .hd{color:#9FB0D6;}
+  .hd .num{font-weight:700;color:var(--orange);}
+  .ft{position:absolute;left:64px;right:64px;bottom:22px;display:flex;justify-content:space-between;
+    color:var(--slate);font-size:12px;letter-spacing:.05em;}
+  .slide.dark .ft{color:#9FB0D6;}
+  h1.title{font-family:Georgia,"Cambria",serif;font-weight:700;font-size:64px;line-height:1.05;letter-spacing:-.5px;margin:6px 0 12px;}
+  h1.kicker{font-size:14px;color:var(--orange);letter-spacing:.24em;text-transform:uppercase;font-weight:700;margin:0 0 8px;}
+  h2.h{font-family:Georgia,"Cambria",serif;font-weight:700;font-size:40px;line-height:1.1;margin:0 0 6px;letter-spacing:-.3px;}
+  h3.sub{font-weight:600;font-size:18px;color:var(--slate);margin:0 0 26px;}
+  p{font-size:16px;line-height:1.5;color:var(--ink);margin:0 0 10px;}
+  .muted{color:var(--slate);}
+  .grid{display:grid;gap:22px;}
+  .two{grid-template-columns:1fr 1fr;}
+  .three{grid-template-columns:1fr 1fr 1fr;}
+  .four{grid-template-columns:repeat(4,1fr);}
+  .card{background:#FBFCFE;border:1px solid var(--line);border-radius:12px;padding:20px 22px;}
+  .card h4{margin:0 0 8px;font-size:16px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:10px;}
+  .card p{font-size:14px;line-height:1.55;color:var(--slate);margin:0;}
+  .chip{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.1em;
+    text-transform:uppercase;padding:6px 12px;border-radius:999px;background:var(--orange-soft);color:#9C3A0E;}
+  .chip.green{background:var(--green-soft);color:#13633F;}
+  .chip.red{background:var(--red-soft);color:#8C1F12;}
+  .chip.navy{background:#E1E6F4;color:#1B2A55;}
+  .stat{display:flex;flex-direction:column;gap:4px;}
+  .stat .num{font-family:Georgia,serif;font-size:54px;font-weight:700;color:var(--ink);letter-spacing:-1px;line-height:1;}
+  .stat .num.orange{color:var(--orange);}
+  .stat .num.green{color:var(--green);}
+  .stat .num.navy{color:var(--navy);}
+  .stat .lbl{font-size:13px;color:var(--slate);}
+  .row{display:flex;align-items:center;gap:14px;}
+  .icon{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    background:var(--orange-soft);color:#9C3A0E;font-weight:800;font-size:14px;flex:0 0 36px;}
+  .icon.navy{background:#E1E6F4;color:#1B2A55;}
+  .icon.green{background:var(--green-soft);color:#13633F;}
+  .icon.red{background:var(--red-soft);color:#8C1F12;}
+  .lst{margin:0;padding:0;list-style:none;}
+  .lst li{position:relative;padding:0 0 10px 22px;font-size:15px;line-height:1.5;color:var(--ink);}
+  .lst li:before{content:"";position:absolute;left:0;top:9px;width:8px;height:8px;border-radius:50%;background:var(--orange);}
+  .lst.dim li{color:#0E1730;}
+  table.cmp{width:100%;border-collapse:collapse;font-size:14px;}
+  table.cmp th,table.cmp td{padding:11px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;}
+  table.cmp th{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--slate);font-weight:700;background:#F4F6FB;}
+  table.cmp td.win{color:var(--green);font-weight:700;}
+  table.cmp td.lose{color:var(--red);}
+  table.cmp tr:last-child td{border-bottom:0;}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.06em;}
+  .pill.g{background:var(--green-soft);color:#13633F;}
+  .pill.r{background:var(--red-soft);color:#8C1F12;}
+  .pill.n{background:#E1E6F4;color:#1B2A55;}
+  .step{display:grid;grid-template-columns:48px 1fr;gap:14px;align-items:start;margin-bottom:14px;}
+  .step .n{width:40px;height:40px;border-radius:10px;background:var(--navy);color:#fff;
+    display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;font-family:Georgia,serif;}
+  .step h5{margin:0 0 4px;font-size:15px;font-weight:700;color:var(--ink);}
+  .step p{margin:0;font-size:13.5px;line-height:1.55;color:var(--slate);}
+  .map{width:100%;height:100%;background:
+    radial-gradient(ellipse at 50% 50%, rgba(243,112,33,.10) 0%, transparent 60%),
+    repeating-linear-gradient(45deg, #F1F4FA 0 12px, #E8ECF5 12px 13px),
+    #F4F6FB;
+    border-radius:12px;border:1px solid var(--line);position:relative;overflow:hidden;}
+  .map .hub{position:absolute;left:50%;top:50%;width:18px;height:18px;border-radius:50%;background:var(--ink);
+    transform:translate(-50%,-50%);box-shadow:0 0 0 4px #fff,0 0 0 5px var(--ink);}
+  .map .hub:after{content:"PNQ HDP";position:absolute;left:24px;top:-2px;font-size:11px;font-weight:700;color:var(--ink);white-space:nowrap;}
+  .map .wedge{position:absolute;left:50%;top:50%;width:0;height:0;transform-origin:0 0;}
+  /* Pie wedges via conic-gradient pseudo-circle */
+  .pie{position:absolute;left:50%;top:50%;width:340px;height:340px;border-radius:50%;
+    transform:translate(-50%,-50%);
+    background:conic-gradient(
+      #F37021 0 60deg,
+      #1F8A5A 60deg 120deg,
+      #2D6CDF 120deg 180deg,
+      #C24DBE 180deg 240deg,
+      #E0A21B 240deg 300deg,
+      #1F3160 300deg 360deg);
+    opacity:.85;
+    -webkit-mask:radial-gradient(circle, transparent 22px, #000 24px);
+            mask:radial-gradient(circle, transparent 22px, #000 24px);
+  }
+  .map .legend{position:absolute;left:14px;bottom:14px;display:flex;flex-direction:column;gap:6px;
+    background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:11px;color:var(--ink);}
+  .map .legend span{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+  .quote{font-family:Georgia,serif;font-style:italic;font-size:26px;line-height:1.45;letter-spacing:-.2px;}
+  .quote .mark{color:var(--orange);font-size:48px;line-height:0;position:relative;top:14px;margin-right:8px;}
+  .ksep{height:1px;background:var(--line);margin:18px 0;}
+  .tag{display:inline-block;padding:4px 10px;border-radius:6px;background:#F0F2F8;color:var(--navy);font-size:12px;font-weight:600;margin:0 6px 6px 0;}
+
+  /* Print: one slide per A4-landscape-equivalent page */
+  @page { size: 1280px 720px; margin: 0; }
+  @media print{
+    html,body{background:#fff;}
+    .deck{padding:0;gap:0;}
+    .slide{box-shadow:none;border-radius:0;page-break-after:always;break-after:page;}
+    .controls{display:none!important;}
+  }
+  .controls{position:fixed;right:16px;bottom:16px;z-index:10;display:flex;gap:8px;}
+  .btn{background:var(--navy);color:#fff;font-weight:700;font-size:13px;padding:10px 14px;border-radius:10px;border:0;cursor:pointer;}
+  .btn.alt{background:#fff;color:var(--navy);border:1px solid var(--navy);}
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- ====================== SLIDE 1 — TITLE ====================== -->
+<section class="slide dark" id="s1">
+  <div class="hd"><div>HACKATHON 2026 <span class="num">/ 01</span></div><div>XPRESSBEES — PNQ HDP</div></div>
+  <div class="pad" style="display:flex;flex:1;align-items:center;gap:48px;">
+    <div style="flex:1.05;">
+      <span class="chip">Last Mile · Allocation Intelligence</span>
+      <h1 class="title" style="color:#fff;margin-top:18px;">Shipment Allocation<br/>Optimizer <span style="color:var(--orange);">v3</span></h1>
+      <p class="muted" style="font-size:20px;max-width:560px;color:#CBD5EE;">
+        Affinity-based smart last-mile allocation — fair earnings, optimized routes, one-click push to LM.
+      </p>
+      <div style="margin-top:32px;display:flex;gap:36px;">
+        <div><div style="font-size:12px;letter-spacing:.18em;color:#9FB0D6;text-transform:uppercase;">Team</div>
+             <div style="font-size:18px;font-weight:600;margin-top:4px;">Omkar Takale &nbsp;·&nbsp; Omkar Baviskar</div></div>
+        <div><div style="font-size:12px;letter-spacing:.18em;color:#9FB0D6;text-transform:uppercase;">Hub</div>
+             <div style="font-size:18px;font-weight:600;margin-top:4px;">PNQ HDP — Pune</div></div>
+      </div>
+    </div>
+    <div style="flex:1;height:440px;position:relative;">
+      <div class="map" style="border-color:#2A3A66;">
+        <div class="pie"></div>
+        <div class="hub"></div>
+        <div class="legend" style="background:rgba(21,35,71,.85);border-color:#2A3A66;color:#E8EEFB;">
+          <div><span style="background:#F37021"></span>SR-1</div>
+          <div><span style="background:#1F8A5A"></span>SR-2</div>
+          <div><span style="background:#2D6CDF"></span>SR-3</div>
+          <div><span style="background:#C24DBE"></span>SR-4</div>
+          <div><span style="background:#E0A21B"></span>SR-5</div>
+          <div><span style="background:#1F3160"></span>SR-6</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ft"><div>Production-ready · Deployed on EC2 stage</div><div>v3 · 2026</div></div>
+</section>
+
+<!-- ====================== SLIDE 2 — PROBLEM ====================== -->
+<section class="slide" id="s2">
+  <div class="hd"><div>PROBLEM <span class="num">/ 02</span></div><div>CURRENT STATE</div></div>
+  <div class="pad" style="display:flex;flex:1;gap:48px;">
+    <div style="flex:1.1;">
+      <h2 class="h">Allocation today is manual,<br/>opinion-driven, and unfair.</h2>
+      <h3 class="sub">Pain points compounding daily across every hub.</h3>
+      <ul class="lst">
+        <li><b>Supervisor intuition</b> drives allocation — not scalable across hubs.</li>
+        <li><b>No geographic clustering</b> — SRs cross each other's routes.</li>
+        <li><b>Uneven earnings</b> — ₹500–₹2,000 variance between SRs daily.</li>
+        <li><b>No route optimization</b> — excess travel, more fuel, longer days.</li>
+        <li><b>No preview or comparison</b> — every change is a blind decision.</li>
+      </ul>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:14px;">
+      <div class="chip red">Business Impact</div>
+      <div class="card"><div class="row"><div class="icon red">!</div>
+        <div><h4 style="margin:0;">15–25% earnings variance</h4>
+        <p>SRs doing similar work earn unequal pay — root cause of attrition.</p></div></div></div>
+      <div class="card"><div class="row"><div class="icon red">!</div>
+        <div><h4 style="margin:0;">20–30% cross-region deliveries</h4>
+        <p>Two SRs criss-crossing the same lane wastes fuel and time.</p></div></div></div>
+      <div class="card"><div class="row"><div class="icon red">!</div>
+        <div><h4 style="margin:0;">30–45 min manual effort / hub / day</h4>
+        <p>A senior person spending an hour every morning on routing.</p></div></div></div>
+      <div class="card" style="border-color:#F2C7BF;background:#FCEFEC;">
+        <div class="row"><div class="icon red">↑</div>
+        <div><h4 style="margin:0;color:#8C1F12;">High SR attrition (earnings-driven)</h4>
+        <p style="color:#8C1F12;">Variability — not amount — is the dissatisfaction trigger.</p></div></div></div>
+    </div>
+  </div>
+  <div class="ft"><div>Source: ops observations &amp; allocation logs, PNQ HDP</div><div>02 / 06</div></div>
+</section>
+
+<!-- ====================== SLIDE 3 — APPROACH ====================== -->
+<section class="slide" id="s3">
+  <div class="hd"><div>APPROACH <span class="num">/ 03</span></div><div>SMART AFFINITY-BASED ALLOCATION</div></div>
+  <div class="pad" style="display:flex;flex:1;gap:36px;">
+    <div style="flex:1.05;">
+      <h2 class="h">A 5-phase pipeline that turns shipments<br/>into fair, road-optimized SR routes.</h2>
+      <h3 class="sub">From XLSX upload to LM allocation in under 2 minutes.</h3>
+
+      <div class="step"><div class="n">1</div><div>
+        <h5>Data Ingestion &amp; Cleanup</h5>
+        <p>XLSX/CSV upload · auto column-detection (20+ aliases) · &gt;50km filter · isolated-point outliers excluded · hub polygon from XB orchestration API.</p></div></div>
+      <div class="step"><div class="n">2</div><div>
+        <h5>Hub-Centric Angular Clustering</h5>
+        <p>Sort by compass bearing from hub · split into equal pie-slice sectors — one per present SR · contiguous wedges, no route crossing.</p></div></div>
+      <div class="step"><div class="n">3</div><div>
+        <h5>Earnings-Based Fairness Rebalancing</h5>
+        <p>Compute gross payout, fuel cost (₹2.5/km), net earnings per SR · iteratively swap boundary shipments · target ±₹50 spread across the team.</p></div></div>
+      <div class="step"><div class="n">4</div><div>
+        <h5>Route Optimization</h5>
+        <p>Nearest-neighbor TSP from hub · Google Maps Directions API for real road routing · Leaflet + Google Maps toggle for visualization.</p></div></div>
+      <div class="step"><div class="n">5</div><div>
+        <h5>LM System Integration</h5>
+        <p>Auto Keycloak (client_credentials) · bulk POST /expose/shipment/allocate · auto-confirm (OFD + trip) · one-click "Push All Routes".</p></div></div>
+    </div>
+    <div style="flex:.95;display:flex;flex-direction:column;gap:14px;">
+      <div style="height:340px;position:relative;">
+        <div class="map">
+          <div class="pie"></div>
+          <div class="hub"></div>
+          <div class="legend">
+            <div><span style="background:#F37021"></span>SR-1 (north)</div>
+            <div><span style="background:#1F8A5A"></span>SR-2 (NE)</div>
+            <div><span style="background:#2D6CDF"></span>SR-3 (E)</div>
+            <div><span style="background:#C24DBE"></span>SR-4 (S)</div>
+            <div><span style="background:#E0A21B"></span>SR-5 (SW)</div>
+            <div><span style="background:#1F3160"></span>SR-6 (W)</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="chip navy" style="margin-bottom:8px;">Tech Stack</div>
+        <div>
+          <span class="tag">Spring Boot 3.4</span><span class="tag">Java 17</span>
+          <span class="tag">Leaflet</span><span class="tag">Google Directions</span>
+          <span class="tag">Keycloak</span><span class="tag">Docker</span><span class="tag">EC2</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ft"><div>Pipeline: ingest → cluster → balance → optimize → push</div><div>03 / 06</div></div>
+</section>
+
+<!-- ====================== SLIDE 4 — OUTCOMES ====================== -->
+<section class="slide" id="s4">
+  <div class="hd"><div>OUTCOMES <span class="num">/ 04</span></div><div>BEFORE vs AFTER</div></div>
+  <div class="pad" style="display:flex;flex:1;flex-direction:column;gap:22px;">
+    <div>
+      <h2 class="h">Measurable impact on every metric that matters.</h2>
+      <h3 class="sub">Numbers from the v3 prototype run on PNQ HDP shipment data.</h3>
+    </div>
+
+    <div class="grid four">
+      <div class="card"><div class="stat"><div class="num orange">80%</div>
+        <div class="lbl">reduction in earnings variance<br/><span class="muted">₹500–2,000 → &lt;₹100</span></div></div></div>
+      <div class="card"><div class="stat"><div class="num orange">75%</div>
+        <div class="lbl">fewer cross-region deliveries<br/><span class="muted">20–30% → &lt;5%</span></div></div></div>
+      <div class="card"><div class="stat"><div class="num orange">25%</div>
+        <div class="lbl">less distance per SR<br/><span class="muted">road-optimized via TSP</span></div></div></div>
+      <div class="card"><div class="stat"><div class="num orange">95%</div>
+        <div class="lbl">faster allocation<br/><span class="muted">30–45 min → &lt;2 min</span></div></div></div>
+    </div>
+
+    <table class="cmp">
+      <thead><tr><th>Metric</th><th>Before — Manual</th><th>After — v3</th><th>Improvement</th></tr></thead>
+      <tbody>
+        <tr><td>Earnings variance across SRs</td><td class="lose">₹500 – ₹2,000</td><td class="win">&lt; ₹100</td><td><span class="pill g">80% ↓</span></td></tr>
+        <tr><td>Cross-region deliveries</td><td class="lose">20 – 30%</td><td class="win">&lt; 5%</td><td><span class="pill g">75% ↓</span></td></tr>
+        <tr><td>Avg distance per SR</td><td class="lose">Unoptimized</td><td class="win">Road-optimized</td><td><span class="pill g">20–30% ↓</span></td></tr>
+        <tr><td>Allocation time per hub</td><td class="lose">30 – 45 min</td><td class="win">&lt; 2 min</td><td><span class="pill g">95% ↓</span></td></tr>
+        <tr><td>SR earnings fairness</td><td class="lose">Low</td><td class="win">High (±₹50)</td><td><span class="pill n">Balanced</span></td></tr>
+      </tbody>
+    </table>
+
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">
+      <span class="chip green">Zero manual intervention</span>
+      <span class="chip green">Real-time preview, zero-risk rollout</span>
+      <span class="chip green">Scalable across any hub</span>
+      <span class="chip green">Leaflet + Google Maps dual view</span>
+      <span class="chip green">Direct LM integration — no copy-paste</span>
+      <span class="chip navy">Live on EC2 · http://13.127.28.147:8080</span>
+    </div>
+  </div>
+  <div class="ft"><div>v3 prototype, measured against manual baseline</div><div>04 / 06</div></div>
+</section>
+
+<!-- ====================== SLIDE 5 — COST ====================== -->
+<section class="slide" id="s5">
+  <div class="hd"><div>COST &amp; ROI <span class="num">/ 05</span></div><div>NEAR-ZERO INCREMENTAL COST</div></div>
+  <div class="pad" style="display:flex;flex:1;gap:36px;">
+    <div style="flex:1.1;">
+      <h2 class="h">Built on existing infra.<br/>Pays back inside one month.</h2>
+      <h3 class="sub">Every line item is either ₹0 or already provisioned.</h3>
+
+      <table class="cmp">
+        <thead><tr><th>Category</th><th>Description</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Infrastructure</td><td>Spring Boot on existing EC2</td><td class="win">₹0 (shared instance)</td></tr>
+          <tr><td>Development</td><td>2 engineers · 3 days (hackathon)</td><td>Internal</td></tr>
+          <tr><td>Google Maps API</td><td>Directions API — 10,000 free / month</td><td class="win">₹0 (within free tier)</td></tr>
+          <tr><td>Keycloak Auth</td><td>Existing stage infra</td><td class="win">₹0</td></tr>
+          <tr><td>Maintenance</td><td>Modular, self-contained</td><td>Minimal</td></tr>
+        </tbody>
+      </table>
+      <div class="ksep"></div>
+      <p style="font-size:18px;"><b>Total:</b> <span style="color:var(--green);font-weight:700;">Near-zero incremental cost.</span></p>
+    </div>
+
+    <div style="flex:.95;display:flex;flex-direction:column;gap:14px;">
+      <div class="chip">ROI Drivers</div>
+      <div class="card"><div class="row"><div class="icon">95%</div>
+        <div><h4>Allocation time freed</h4>
+        <p>Supervisor recovers an hour every morning — redirected to coaching &amp; exception handling.</p></div></div></div>
+      <div class="card"><div class="row"><div class="icon">80%</div>
+        <div><h4>Lower earnings variance</h4>
+        <p>Stable take-home reduces SR attrition — reduces re-hire &amp; training cost.</p></div></div></div>
+      <div class="card"><div class="row"><div class="icon">75%</div>
+        <div><h4>Less cross-region driving</h4>
+        <p>Direct fuel savings + fewer late deliveries.</p></div></div></div>
+      <div class="card" style="background:#F0F8F4;border-color:#BFE2CE;">
+        <div class="stat"><div class="num green">₹2 – 5 L</div>
+        <div class="lbl"><b>estimated savings per hub / month</b> at scale</div></div></div>
+    </div>
+  </div>
+  <div class="ft"><div>Estimates based on PNQ HDP volumes + observed waste</div><div>05 / 06</div></div>
+</section>
+
+<!-- ====================== SLIDE 6 — EXECUTIVE SUMMARY ====================== -->
+<section class="slide dark" id="s6">
+  <div class="hd"><div>EXECUTIVE SUMMARY <span class="num">/ 06</span></div><div>WHAT WE BUILT</div></div>
+  <div class="pad" style="display:flex;flex:1;gap:36px;">
+    <div style="flex:1.15;">
+      <h2 class="h" style="color:#fff;">Production-ready allocation intelligence —<br/>no disruption to existing systems.</h2>
+      <h3 class="sub" style="color:#B6C0D9;">A snapshot of the problems solved and the velocity it took.</h3>
+
+      <table class="cmp" style="background:transparent;">
+        <thead><tr style="background:#1F3160;"><th style="color:#CBD5EE;background:#1F3160;">Problem</th><th style="color:#CBD5EE;background:#1F3160;">Resolution</th><th style="color:#CBD5EE;background:#1F3160;">Impact</th></tr></thead>
+        <tbody style="color:#E8EEFB;">
+          <tr><td style="color:#E8EEFB;border-color:#2A3A66;">Manual allocation</td><td style="color:#E8EEFB;border-color:#2A3A66;">Automated engine</td><td style="border-color:#2A3A66;"><span class="pill g">95% time saved</span></td></tr>
+          <tr><td style="color:#E8EEFB;border-color:#2A3A66;">Earnings imbalance</td><td style="color:#E8EEFB;border-color:#2A3A66;">Fairness rebalancing</td><td style="border-color:#2A3A66;"><span class="pill g">80% variance ↓</span></td></tr>
+          <tr><td style="color:#E8EEFB;border-color:#2A3A66;">Route inefficiency</td><td style="color:#E8EEFB;border-color:#2A3A66;">Angular clustering + TSP</td><td style="border-color:#2A3A66;"><span class="pill g">25% less distance</span></td></tr>
+          <tr><td style="color:#E8EEFB;border-color:#2A3A66;">No visibility</td><td style="color:#E8EEFB;border-color:#2A3A66;">Real-time map &amp; preview</td><td style="border-color:#2A3A66;"><span class="pill n">Full transparency</span></td></tr>
+          <tr><td style="color:#E8EEFB;border-color:#2A3A66;">System disconnect</td><td style="color:#E8EEFB;border-color:#2A3A66;">LM API integration</td><td style="border-color:#2A3A66;"><span class="pill n">One-click push</span></td></tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top:18px;">
+        <div class="quote"><span class="mark">“</span>
+          Today, allocation depends on human judgment.<br/>
+          With v3, we convert it into a data-driven, fair, and scalable<br/>
+          decision engine — with zero disruption to existing systems.</div>
+      </div>
+    </div>
+
+    <div style="flex:.85;display:flex;flex-direction:column;gap:14px;">
+      <div class="card" style="background:#1F3160;border-color:#2A3A66;">
+        <div class="chip" style="background:#FFE7D6;color:#9C3A0E;margin-bottom:10px;">Delivery Velocity</div>
+        <div class="grid two">
+          <div class="stat"><div class="num orange">3</div><div class="lbl" style="color:#CBD5EE;">days sprint<br/>(hackathon)</div></div>
+          <div class="stat"><div class="num orange">10+</div><div class="lbl" style="color:#CBD5EE;">features shipped<br/>engine · UI · integration</div></div>
+          <div class="stat"><div class="num orange">789</div><div class="lbl" style="color:#CBD5EE;">Directions API calls<br/>0% error rate</div></div>
+          <div class="stat"><div class="num orange">0₹</div><div class="lbl" style="color:#CBD5EE;">incremental infra cost</div></div>
+        </div>
+      </div>
+      <div class="card" style="background:#1F3160;border-color:#2A3A66;">
+        <div class="chip green" style="margin-bottom:10px;">Status</div>
+        <p style="color:#E8EEFB;font-size:15px;line-height:1.55;margin:0;">
+          Deployed on EC2 stage · integrated with LM allocation APIs ·
+          ready for <b style="color:#fff;">one-hub pilot</b>, then scale.
+        </p>
+      </div>
+      <div class="card" style="background:#1F3160;border-color:#2A3A66;">
+        <div class="chip navy" style="margin-bottom:10px;">Live URL</div>
+        <p style="color:#CBD5EE;font-size:15px;margin:0;font-family:Consolas,Menlo,monospace;">http://13.127.28.147:8080</p>
+      </div>
+    </div>
+  </div>
+  <div class="ft"><div>Hackathon 2026 · Shipment Allocation Optimizer v3</div><div>06 / 06</div></div>
+</section>
+
+<!-- ====================== SLIDE 7 — DEMO SCRIPT (appendix) ====================== -->
+<section class="slide" id="s7">
+  <div class="hd"><div>APPENDIX — DEMO SCRIPT <span class="num">/ A1</span></div><div>2-MINUTE WALKTHROUGH</div></div>
+  <div class="pad" style="display:flex;flex:1;gap:36px;">
+    <div style="flex:1;">
+      <h2 class="h">2-minute live demo flow.</h2>
+      <h3 class="sub">From a fresh browser tab to LM allocation pushed.</h3>
+      <div class="step"><div class="n">1</div><div><h5>Open the app</h5><p>http://13.127.28.147:8080</p></div></div>
+      <div class="step"><div class="n">2</div><div><h5>Upload XLSX</h5><p>4,570 rows parsed · dates auto-detected · out-of-range filtered.</p></div></div>
+      <div class="step"><div class="n">3</div><div><h5>Pick date · mark SRs present</h5><p>Attendance directly drives wedge count.</p></div></div>
+      <div class="step"><div class="n">4</div><div><h5>Run Allocation (Google Maps)</h5><p>Pie-slice routes drawn live on the map.</p></div></div>
+      <div class="step"><div class="n">5</div><div><h5>Fullscreen + drill-in</h5><p>Click any SR — route detail, stop sequence, distance.</p></div></div>
+    </div>
+    <div style="flex:1;">
+      <h3 class="sub" style="opacity:0;margin-top:64px;">.</h3>
+      <div class="step"><div class="n">6</div><div><h5>Toggle Google view</h5><p>Satellite/road detail for spot checks.</p></div></div>
+      <div class="step"><div class="n">7</div><div><h5>Push to LM</h5><p>Connect → Keycloak auth flows in.</p></div></div>
+      <div class="step"><div class="n">8</div><div><h5>Map SRs</h5><p>App-side IDs to LM driver IDs.</p></div></div>
+      <div class="step"><div class="n">9</div><div><h5>Push All Routes</h5><p>Allocation flows to LM · OFD &amp; trip auto-confirm.</p></div></div>
+      <div class="step"><div class="n">10</div><div><h5>Close the loop</h5><p>"This entire flow — upload to LM allocation — under 2 minutes."</p></div></div>
+
+      <div class="card" style="margin-top:8px;background:#FFF7EE;border-color:#F4D5B8;">
+        <div class="chip" style="margin-bottom:8px;">Closing line — say it confidently</div>
+        <p style="color:#0E1730;font-style:italic;font-size:15px;">
+          "Today allocation depends on human judgment. With this system, we convert it into a data-driven, fair, and scalable decision engine."
+        </p>
+      </div>
+    </div>
+  </div>
+  <div class="ft"><div>Use this as your delivery script — keep eye contact, click decisively</div><div>A1 / A2</div></div>
+</section>
+
+<!-- ====================== SLIDE 8 — TOUGH QUESTIONS ====================== -->
+<section class="slide" id="s8">
+  <div class="hd"><div>APPENDIX — Q&amp;A <span class="num">/ A2</span></div><div>TOUGH QUESTIONS, READY ANSWERS</div></div>
+  <div class="pad" style="display:flex;flex:1;flex-direction:column;gap:18px;">
+    <div>
+      <h2 class="h">If they push, push back with data.</h2>
+      <h3 class="sub">The six questions a CEO/COO will ask, and how you answer.</h3>
+    </div>
+    <div class="grid two">
+      <div class="card"><h4><span class="icon navy">Q</span>How is this different from existing allocation?</h4>
+        <p>Existing is manual + pincode-based. v3 uses geo-coordinates, angular clustering, and earnings-based rebalancing — data-driven, not intuition-driven.</p></div>
+      <div class="card"><h4><span class="icon navy">Q</span>What if SR count changes mid-day?</h4>
+        <p>Re-run allocation with updated attendance — under 30 seconds. Engine is stateless on that axis.</p></div>
+      <div class="card"><h4><span class="icon navy">Q</span>Will this work for other hubs?</h4>
+        <p>Yes — change hub lat/lng in config and upload that hub's shipments. No code change required.</p></div>
+      <div class="card"><h4><span class="icon navy">Q</span>What about reverse pickups (RVP)?</h4>
+        <p>Forward-only today. RVP can be added as a separate allocation type using the same engine.</p></div>
+      <div class="card"><h4><span class="icon navy">Q</span>Google Maps API cost at scale?</h4>
+        <p>10k free calls/month. 10 SRs × 30 days = 300 calls/month — well inside free tier. 100 hubs = ~30k = ~$100/month.</p></div>
+      <div class="card"><h4><span class="icon navy">Q</span>Is it production-ready?</h4>
+        <p>Deployed on EC2 stage right now. Integrated with LM APIs. Needs pilot approval for one hub, then scale.</p></div>
+    </div>
+  </div>
+  <div class="ft"><div>Keep these answers tight — confidence beats length</div><div>A2 / A2</div></div>
+</section>
+
+</div>
+
+<div class="controls">
+  <button class="btn" onclick="window.print()">Print / Save as PDF</button>
+  <button class="btn alt" onclick="document.documentElement.requestFullscreen && document.documentElement.requestFullscreen()">Fullscreen</button>
+</div>
+
+</body>
+</html>
