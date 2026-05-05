@@ -6,6 +6,9 @@
   <title>Shipment Allocation Optimizer v3</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet-PM: polygon drawing plugin -->
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.css"/>
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.min.js"></script>
   <script>
     // Google Maps API key — loaded from /api/config at runtime
     var GMAP_API_KEY = '';
@@ -270,10 +273,40 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         SR Affinity
         <span class="badge" id="affinity-match-badge" style="background:#8e24aa">0 defined</span>
       </div>
-      <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">Assign <strong>one pincode per SR</strong>. Each SR receives <strong>only</strong> shipments from their assigned pincode — no cross-pincode allocation.</div>
-      <div id="affinity-match-list" style="max-height:200px;overflow-y:auto;margin-bottom:8px">
-        <div class="empty-text">Select a date and load attendance first</div>
+
+      <!-- Mode toggle: Pincode vs Custom Region -->
+      <div style="display:flex;gap:3px;margin-bottom:8px;background:#f8f9fa;border-radius:6px;padding:3px">
+        <button id="affinity-mode-pincode-btn"
+                onclick="setAffinityMode('pincode')"
+                style="flex:1;padding:5px 8px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#8e24aa;color:#fff;transition:all .2s">
+          📍 Pincode
+        </button>
+        <button id="affinity-mode-draw-btn"
+                onclick="setAffinityMode('draw')"
+                style="flex:1;padding:5px 8px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#e9ecef;color:#495057;transition:all .2s">
+          ✏️ Draw Region
+        </button>
       </div>
+
+      <!-- Pincode mode -->
+      <div id="affinity-pincode-mode">
+        <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">Assign <strong>one pincode per SR</strong>. Each SR receives <strong>only</strong> shipments from their assigned pincode — no cross-pincode allocation.</div>
+        <div id="affinity-match-list" style="max-height:200px;overflow-y:auto;margin-bottom:8px">
+          <div class="empty-text">Select a date and load attendance first</div>
+        </div>
+      </div>
+
+      <!-- Draw Region mode -->
+      <div id="affinity-draw-mode" style="display:none">
+        <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">
+          Draw a <strong>custom polygon</strong> on the map for each SR. The polygon must stay within the hub boundary.
+        </div>
+        <div id="affinity-draw-list" style="max-height:220px;overflow-y:auto;margin-bottom:8px">
+          <div class="empty-text">Select a date and load attendance first</div>
+        </div>
+        <div id="affinity-draw-status" style="font-size:.72rem;color:#6c757d;margin-bottom:6px;min-height:18px"></div>
+      </div>
+
       <div style="display:flex;gap:5px">
         <button class="btn btn-primary" style="flex:1;font-size:.76rem" onclick="runAffinityAllocation()">🎯 Run with Affinity</button>
         <button class="btn btn-secondary" style="font-size:.76rem" onclick="clearAllAffinities()">Clear</button>
@@ -1679,6 +1712,246 @@ function toggleShipmentDisplay() {
   }
 }
 
+// ── CUSTOM AFFINITY REGION DRAWING ───────────────────────────────────────────
+// Stores drawn polygons per SR: { srName: { layer: L.polygon, latlngs: [[lat,lng]...] } }
+var customRegionMap = {};
+var affinityMode = 'pincode'; // 'pincode' | 'draw'
+var activeDrawSr = null;      // SR currently being drawn for
+var customRegionLayers = {};  // srName → L.polygon on map (for display)
+var drawingActive = false;
+
+/**
+ * Switch between pincode-based and draw-based affinity modes.
+ */
+function setAffinityMode(mode) {
+  affinityMode = mode;
+  var pincodeBtn = document.getElementById('affinity-mode-pincode-btn');
+  var drawBtn    = document.getElementById('affinity-mode-draw-btn');
+  var pincodeDiv = document.getElementById('affinity-pincode-mode');
+  var drawDiv    = document.getElementById('affinity-draw-mode');
+
+  if (mode === 'pincode') {
+    pincodeBtn.style.background = '#8e24aa'; pincodeBtn.style.color = '#fff';
+    drawBtn.style.background = '#e9ecef';    drawBtn.style.color = '#495057';
+    pincodeDiv.style.display = 'block';
+    drawDiv.style.display = 'none';
+    stopDrawing(); // cancel any active drawing
+  } else {
+    drawBtn.style.background = '#8e24aa'; drawBtn.style.color = '#fff';
+    pincodeBtn.style.background = '#e9ecef'; pincodeBtn.style.color = '#495057';
+    pincodeDiv.style.display = 'none';
+    drawDiv.style.display = 'block';
+    renderDrawList();
+  }
+  updateAffinityBadge();
+}
+
+/**
+ * Render the per-SR draw buttons in draw mode.
+ */
+function renderDrawList() {
+  var container = document.getElementById('affinity-draw-list');
+  if (!presentSrNames || !presentSrNames.length) {
+    container.innerHTML = '<div class="empty-text">Mark SRs present first</div>';
+    return;
+  }
+  var h = '';
+  presentSrNames.forEach(function(sr, i) {
+    var color = SR_COLORS[i % SR_COLORS.length];
+    var hasRegion = customRegionMap[sr] && customRegionMap[sr].latlngs && customRegionMap[sr].latlngs.length >= 3;
+    var isActive  = activeDrawSr === sr;
+    h += '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
+    h += '<div style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>';
+    h += '<div style="min-width:52px;font-weight:600;color:#212529">' + esc(sr) + '</div>';
+    if (isActive) {
+      h += '<button onclick="stopDrawing()" style="flex:1;padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#e53935;color:#fff">⏹ Stop</button>';
+    } else {
+      h += '<button onclick="startDrawingFor(\'' + esc(sr) + '\',' + i + ')" style="flex:1;padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:' + (hasRegion ? '#43a047' : '#1976d2') + ';color:#fff">' + (hasRegion ? '✏️ Redraw' : '✏️ Draw') + '</button>';
+    }
+    if (hasRegion && !isActive) {
+      h += '<button onclick="clearCustomRegion(\'' + esc(sr) + '\')" title="Remove region" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#ffebee;color:#c62828">✕</button>';
+    }
+    h += '</div>';
+  });
+  container.innerHTML = h;
+  updateAffinityBadge();
+}
+
+/**
+ * Start drawing a polygon for the given SR.
+ * Uses Leaflet-PM freehand/polygon drawing.
+ */
+function startDrawingFor(srName, srIndex) {
+  if (!map.pm) {
+    showAllocError('Drawing plugin not loaded. Please refresh the page.');
+    return;
+  }
+  // Stop any existing drawing first
+  stopDrawing();
+
+  activeDrawSr = srName;
+  drawingActive = true;
+
+  var color = SR_COLORS[srIndex % SR_COLORS.length];
+  setDrawStatus('✏️ Drawing region for <strong>' + esc(srName) + '</strong> — click to add points, double-click to finish');
+
+  // Configure Leaflet-PM for polygon drawing
+  map.pm.enableDraw('Polygon', {
+    snappable: false,
+    cursorMarker: true,
+    allowSelfIntersection: false,
+    templineStyle: { color: color, weight: 2, dashArray: '5,5' },
+    hintlineStyle: { color: color, weight: 1, dashArray: '5,5' },
+    pathOptions: { color: color, weight: 2.5, fillColor: color, fillOpacity: 0.18 }
+  });
+
+  // Listen for the polygon being created
+  map.once('pm:create', function(e) {
+    drawingActive = false;
+    map.pm.disableDraw();
+
+    var layer = e.layer;
+    var latlngs = layer.getLatLngs()[0]; // outer ring
+
+    // Validate the drawn polygon
+    var validation = validateCustomRegion(latlngs);
+    if (!validation.valid) {
+      map.removeLayer(layer);
+      setDrawStatus('❌ ' + validation.reason + ' — please try again');
+      activeDrawSr = null;
+      renderDrawList();
+      return;
+    }
+
+    // Remove old region for this SR if any
+    if (customRegionLayers[srName]) {
+      map.removeLayer(customRegionLayers[srName]);
+    }
+
+    // Store the polygon
+    var coords = latlngs.map(function(ll) { return [ll.lat, ll.lng]; });
+    customRegionMap[srName] = { latlngs: coords, color: color };
+
+    // Replace the temporary layer with a styled permanent one
+    map.removeLayer(layer);
+    var permLayer = L.polygon(coords, {
+      color: color,
+      weight: 2.5,
+      opacity: 0.9,
+      fillColor: color,
+      fillOpacity: 0.15,
+      dashArray: null
+    }).addTo(map);
+    permLayer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(srName) + ' — Custom Region</span>', { sticky: true });
+    customRegionLayers[srName] = permLayer;
+
+    activeDrawSr = null;
+    setDrawStatus('✅ Region saved for <strong>' + esc(srName) + '</strong> (' + coords.length + ' points)');
+    renderDrawList();
+  });
+
+  renderDrawList();
+}
+
+/**
+ * Stop any active drawing.
+ */
+function stopDrawing() {
+  if (map.pm && map.pm.globalDrawModeEnabled()) {
+    map.pm.disableDraw();
+  }
+  drawingActive = false;
+  if (activeDrawSr) {
+    setDrawStatus('Drawing cancelled for <strong>' + esc(activeDrawSr) + '</strong>');
+    activeDrawSr = null;
+    renderDrawList();
+  }
+}
+
+/**
+ * Remove a custom region for an SR.
+ */
+function clearCustomRegion(srName) {
+  if (customRegionLayers[srName]) {
+    map.removeLayer(customRegionLayers[srName]);
+    delete customRegionLayers[srName];
+  }
+  delete customRegionMap[srName];
+  renderDrawList();
+  setDrawStatus('Region cleared for <strong>' + esc(srName) + '</strong>');
+}
+
+/**
+ * Validate a drawn polygon:
+ * - At least 3 points
+ * - Minimum area (> 0.01 km²)
+ * - Must overlap with hub boundary
+ * - Not self-intersecting (Leaflet-PM handles this, but we double-check area)
+ */
+function validateCustomRegion(latlngs) {
+  if (!latlngs || latlngs.length < 3) {
+    return { valid: false, reason: 'Polygon needs at least 3 points' };
+  }
+
+  // Minimum area check using shoelace formula (in degrees² → approximate km²)
+  var area = 0;
+  var n = latlngs.length;
+  for (var i = 0; i < n; i++) {
+    var j = (i + 1) % n;
+    area += latlngs[i].lat * latlngs[j].lng;
+    area -= latlngs[j].lat * latlngs[i].lng;
+  }
+  area = Math.abs(area) / 2;
+  // Convert degrees² to km² (rough: 1° lat ≈ 111km, 1° lng ≈ 111km at equator)
+  var areaKm2 = area * 111 * 111;
+  if (areaKm2 < 0.01) {
+    return { valid: false, reason: 'Region is too small (min 0.01 km²)' };
+  }
+
+  // Hub boundary overlap check — at least one vertex must be inside hub boundary
+  // or the hub centroid must be inside the polygon
+  if (hubBoundaryLayer) {
+    var hubLatLngs = hubBoundaryLayer.getLatLngs()[0];
+    if (hubLatLngs && hubLatLngs.length > 0) {
+      // Check if any drawn vertex is inside hub boundary
+      var anyInside = latlngs.some(function(pt) {
+        return pointInLeafletPolygon(pt.lat, pt.lng, hubLatLngs);
+      });
+      if (!anyInside) {
+        // Also check if hub centroid is inside drawn polygon
+        var hubCenter = hubBoundaryLayer.getBounds().getCenter();
+        var hubInDrawn = pointInLeafletPolygon(hubCenter.lat, hubCenter.lng, latlngs);
+        if (!hubInDrawn) {
+          return { valid: false, reason: 'Region must overlap with the hub service boundary' };
+        }
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Ray-casting point-in-polygon for Leaflet LatLng arrays.
+ */
+function pointInLeafletPolygon(lat, lng, ring) {
+  var inside = false;
+  var n = ring.length;
+  for (var i = 0, j = n - 1; i < n; j = i++) {
+    var yi = ring[i].lat, xi = ring[i].lng;
+    var yj = ring[j].lat, xj = ring[j].lng;
+    if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function setDrawStatus(html) {
+  var el = document.getElementById('affinity-draw-status');
+  if (el) el.innerHTML = html;
+}
+
 // ── SR AFFINITY MATCHING ───────────────────────────────────────────────────────
 var srAffinityMap = {}; // { srName: [pincode1, pincode2, ...] }
 var availablePincodes = []; // [{ pincode, count }]
@@ -1732,6 +2005,7 @@ function showAffinityPanel() {
   document.getElementById('affinity-match-panel').style.display = 'block';
   loadAvailablePincodes();
   renderAffinityList();
+  renderDrawList();
 }
 
 function loadAvailablePincodes() {
@@ -1794,22 +2068,72 @@ function updateSrAffinityStrict(select) {
 }
 
 function updateAffinityBadge() {
-  var count = Object.keys(srAffinityMap).filter(function(k) { return srAffinityMap[k] && srAffinityMap[k].length > 0; }).length;
+  var count;
+  if (affinityMode === 'draw') {
+    count = Object.keys(customRegionMap).filter(function(k) {
+      return customRegionMap[k] && customRegionMap[k].latlngs && customRegionMap[k].latlngs.length >= 3;
+    }).length;
+  } else {
+    count = Object.keys(srAffinityMap).filter(function(k) { return srAffinityMap[k] && srAffinityMap[k].length > 0; }).length;
+  }
   document.getElementById('affinity-match-badge').textContent = count + ' defined';
 }
 
 function clearAllAffinities() {
   srAffinityMap = {};
+  // Also clear custom regions
+  Object.keys(customRegionLayers).forEach(function(sr) { map.removeLayer(customRegionLayers[sr]); });
+  customRegionMap = {};
+  customRegionLayers = {};
+  stopDrawing();
   fetch('/api/affinity-match/clear', { method: 'DELETE' }).catch(function() {});
   renderAffinityList();
+  renderDrawList();
   document.getElementById('affinity-match-result').innerHTML = '';
+  setDrawStatus('');
 }
 
 function runAffinityAllocation() {
   var date = document.getElementById('date-select').value;
   if (!date) { showAllocError('Select a date first.'); return; }
 
-  // Send affinities to backend
+  // ── Draw mode: use custom polygon regions ──────────────────────────────────
+  if (affinityMode === 'draw') {
+    var regions = {};
+    var count = 0;
+    for (var sr in customRegionMap) {
+      if (customRegionMap[sr] && customRegionMap[sr].latlngs && customRegionMap[sr].latlngs.length >= 3) {
+        regions[sr] = customRegionMap[sr].latlngs; // [[lat,lng], ...]
+        count++;
+      }
+    }
+    if (count === 0) { showAllocError('Draw at least one custom region before running.'); return; }
+
+    fetch('/api/affinity-match/set-custom-regions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ regions: regions })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(setResult) {
+      if (setResult.error) { showAllocError(setResult.error); return; }
+      return fetch('/api/affinity-match/allocate-custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: date })
+      });
+    })
+    .then(function(r) { if (r) return r.json(); })
+    .then(function(data) {
+      if (!data) return;
+      if (data.error) { showAllocError(data.error); return; }
+      _handleAffinityResult(data, date);
+    })
+    .catch(function(e) { showAllocError('Custom region allocation failed: ' + e.message); });
+    return;
+  }
+
+  // ── Pincode mode: use pincode-based affinity ───────────────────────────────
   var affinities = {};
   for (var sr in srAffinityMap) {
     if (srAffinityMap[sr] && srAffinityMap[sr].length > 0) {
@@ -1824,7 +2148,6 @@ function runAffinityAllocation() {
     body: JSON.stringify({ affinities: affinities })
   })
   .then(function() {
-    // Step 2: Run allocation with affinity
     return fetch('/api/affinity-match/allocate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1834,34 +2157,40 @@ function runAffinityAllocation() {
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (data.error) { showAllocError(data.error); return; }
-
-    var summary = data.allocationSummary;
-    if (summary) {
-      document.getElementById('summary-mode-badge').textContent = data.mode === 'affinity' ? 'Affinity' : 'Standard';
-      document.getElementById('summary-mode-badge').style.background = data.mode === 'affinity' ? '#8e24aa' : '#1976d2';
-      renderSummary(summary);
-      renderSrList(summary.srSummaries);
-      lmShowPanel(summary.srSummaries);
-      renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode || 'osm');
-    }
-
-    // Show affinity scores
-    var scores = data.affinityScores;
-    if (scores) {
-      var resHtml = '<div class="result-card info" style="font-size:.74rem">';
-      resHtml += '<div style="font-weight:700;margin-bottom:4px">Affinity Match Results</div>';
-      for (var sr in scores) {
-        var s = scores[sr];
-        var icon = s.affinityPct > 50 ? '✅' : (s.affinityPct > 0 ? '⚠️' : '➖');
-        resHtml += '<div>' + icon + ' <b>' + esc(sr) + '</b>: ' + s.affinityShipments + '/' + s.totalShipments + ' in affinity area (' + s.affinityPct + '%)</div>';
-      }
-      resHtml += '</div>';
-      document.getElementById('affinity-match-result').innerHTML = resHtml;
-    }
-
-    showAllocInfo('Affinity allocation complete: ' + data.affinitySRs + ' SRs with affinity, ' + data.totalSRs + ' total');
+    _handleAffinityResult(data, date);
   })
   .catch(function(e) { showAllocError('Affinity allocation failed: ' + e.message); });
+}
+
+/** Shared result handler for both pincode and custom-region affinity allocation. */
+function _handleAffinityResult(data, date) {
+  var summary = data.allocationSummary;
+  if (summary) {
+    var modeLabel = data.mode === 'affinity-custom' ? 'Custom Regions' : (data.mode === 'affinity-strict' ? 'Affinity' : 'Standard');
+    var modeBg    = (data.mode === 'affinity-custom' || data.mode === 'affinity-strict') ? '#8e24aa' : '#1976d2';
+    document.getElementById('summary-mode-badge').textContent = modeLabel;
+    document.getElementById('summary-mode-badge').style.background = modeBg;
+    renderSummary(summary);
+    renderSrList(summary.srSummaries);
+    lmShowPanel(summary.srSummaries);
+    renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode || 'osm');
+  }
+
+  var scores = data.affinityScores;
+  if (scores) {
+    var resHtml = '<div class="result-card info" style="font-size:.74rem">';
+    resHtml += '<div style="font-weight:700;margin-bottom:4px">Affinity Match Results</div>';
+    for (var sr in scores) {
+      var s = scores[sr];
+      var icon = s.affinityPct > 50 ? '✅' : (s.affinityPct > 0 ? '⚠️' : '➖');
+      resHtml += '<div>' + icon + ' <b>' + esc(sr) + '</b>: ' + s.affinityShipments + '/' + s.totalShipments + ' in affinity area (' + s.affinityPct + '%)</div>';
+    }
+    resHtml += '</div>';
+    document.getElementById('affinity-match-result').innerHTML = resHtml;
+  }
+
+  var modeInfo = data.mode === 'affinity-custom' ? 'Custom region allocation' : 'Affinity allocation';
+  showAllocInfo(modeInfo + ' complete: ' + (data.affinitySRs || data.customRegionSRs || 0) + ' SRs assigned');
 }
 
 // Show affinity panel when attendance loads

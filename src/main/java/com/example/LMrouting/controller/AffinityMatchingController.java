@@ -42,6 +42,9 @@ public class AffinityMatchingController {
     // In-memory affinity storage: srName → set of preferred pincodes
     private final Map<String, Set<String>> srAffinities = new LinkedHashMap<>();
 
+    // In-memory custom region storage: srName → polygon ring as [lat,lng] pairs
+    private final Map<String, double[][]> customRegions = new LinkedHashMap<>();
+
     /**
      * Set/update SR affinities.
      * Body: { "affinities": { "SR-001": ["411001","411002"], "SR-003": ["411038","411039"] } }
@@ -301,5 +304,183 @@ public class AffinityMatchingController {
             if (store.hasShipmentsForDate(candidate)) return candidate;
         }
         return date.toString();
+    }
+
+    // =========================================================================
+    // Custom Region Drawing endpoints
+    // =========================================================================
+
+    /**
+     * Store custom polygon regions for each SR.
+     *
+     * POST /api/affinity-match/set-custom-regions
+     * Body: { "regions": { "SR-001": [[lat,lng], [lat,lng], ...], "SR-002": [...] } }
+     */
+    @PostMapping("/set-custom-regions")
+    public ResponseEntity<Map<String, Object>> setCustomRegions(@RequestBody Map<String, Object> request) {
+        @SuppressWarnings("unchecked")
+        Map<String, List<List<Double>>> regions =
+                (Map<String, List<List<Double>>>) request.get("regions");
+
+        if (regions == null || regions.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "regions map is required"));
+        }
+
+        customRegions.clear();
+        for (Map.Entry<String, List<List<Double>>> entry : regions.entrySet()) {
+            String srName = entry.getKey();
+            List<List<Double>> polygon = entry.getValue();
+            if (polygon != null && polygon.size() >= 3) {
+                // Convert to double[][] for storage
+                double[][] ring = polygon.stream()
+                        .map(pt -> new double[]{pt.get(0), pt.get(1)})
+                        .toArray(double[][]::new);
+                customRegions.put(srName, ring);
+            }
+        }
+
+        log.info("AffinityMatch: stored custom regions for {} SRs", customRegions.size());
+        return ResponseEntity.ok(Map.of("success", true, "srCount", customRegions.size()));
+    }
+
+    /**
+     * Run allocation using custom drawn polygon regions.
+     * Each SR gets ONLY shipments whose coordinates fall inside their drawn polygon.
+     *
+     * POST /api/affinity-match/allocate-custom
+     * Body: { "date": "24-Mar-26" }
+     */
+    @PostMapping("/allocate-custom")
+    public ResponseEntity<Map<String, Object>> allocateWithCustomRegions(
+            @RequestBody Map<String, String> request) {
+
+        String dateStr = request.get("date");
+        if (dateStr == null || dateStr.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "date is required"));
+        }
+        if (customRegions.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No custom regions defined. Call /set-custom-regions first."));
+        }
+
+        LocalDate date = AllocationController.parseDate(dateStr);
+
+        // Step 1: Run standard allocation to get filtered shipments + present SRs
+        AllocationSummary summary = allocationEngineService.allocate(date);
+        String storeDateStr = summary.date();
+
+        List<Shipment> allShipments = store.findShipmentsByDate(storeDateStr);
+        List<Shipment> allocated = allShipments.stream()
+                .filter(s -> s.getAssignedSr() != null)
+                .collect(Collectors.toList());
+        List<String> presentSRs = allocated.stream()
+                .map(Shipment::getAssignedSr).distinct().sorted()
+                .collect(Collectors.toList());
+
+        // Step 2: Assign shipments using point-in-polygon against custom regions
+        Map<String, List<Shipment>> matched = new LinkedHashMap<>();
+        Set<String> assignedIds = new HashSet<>();
+
+        for (String sr : presentSRs) {
+            matched.put(sr, new ArrayList<>());
+        }
+
+        for (Map.Entry<String, double[][]> entry : customRegions.entrySet()) {
+            String sr = entry.getKey();
+            double[][] polygon = entry.getValue();
+
+            if (!matched.containsKey(sr)) continue; // SR not present today
+
+            List<Shipment> inRegion = allocated.stream()
+                    .filter(s -> !assignedIds.contains(s.getShippingId()))
+                    .filter(s -> pointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
+                    .collect(Collectors.toList());
+
+            // Enforce 100-shipment cap — sort by payout descending to keep highest-value deliveries
+            List<Shipment> capped = inRegion.size() > 100
+                    ? inRegion.stream()
+                        .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed())
+                        .limit(100)
+                        .collect(Collectors.toList())
+                    : inRegion;
+
+            matched.get(sr).addAll(capped);
+            capped.forEach(s -> assignedIds.add(s.getShippingId()));
+            log.info("AffinityMatch custom: {} → {} shipments in drawn region ({}  in polygon, capped at 100)",
+                    sr, capped.size(), inRegion.size());
+        }
+
+        // Unassigned shipments stay unallocated (strict custom region mode)
+        long unassigned = allocated.stream()
+                .filter(s -> !assignedIds.contains(s.getShippingId()))
+                .count();
+        if (unassigned > 0) {
+            log.info("AffinityMatch custom: {} shipments outside all custom regions → unallocated", unassigned);
+        }
+
+        // Step 3: Sequence routes
+        for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
+            String sr = entry.getKey();
+            List<Shipment> srShipments = entry.getValue();
+            if (srShipments.isEmpty()) continue;
+            List<Shipment> ordered = srShipments.size() >= 2
+                    ? routeOptimizerService.optimizeRoute(sr, srShipments)
+                    : new ArrayList<>(srShipments);
+            if (ordered.size() == 1) ordered.get(0).setRouteSequence(1);
+            for (Shipment s : ordered) s.setAssignedSr(sr);
+            entry.setValue(ordered);
+        }
+
+        // Save
+        List<Shipment> toSave = matched.values().stream()
+                .flatMap(List::stream).collect(Collectors.toList());
+        store.saveShipments(storeDateStr, toSave);
+
+        // Compute affinity scores (using custom region membership)
+        Map<String, Map<String, Object>> scores = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
+            String sr = entry.getKey();
+            List<Shipment> srShipments = entry.getValue();
+            double[][] polygon = customRegions.get(sr);
+            int inRegion = polygon == null ? 0 : (int) srShipments.stream()
+                    .filter(s -> pointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
+                    .count();
+            int total = srShipments.size();
+            double pct = total > 0 ? Math.round(inRegion * 1000.0 / total) / 10.0 : 0;
+            Map<String, Object> sc = new LinkedHashMap<>();
+            sc.put("affinityShipments", inRegion);
+            sc.put("totalShipments", total);
+            sc.put("affinityPct", pct);
+            scores.put(sr, sc);
+        }
+
+        AllocationSummary newSummary = allocationEngineService.getSummary(date);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("date", storeDateStr);
+        result.put("mode", "affinity-custom");
+        result.put("customRegionSRs", customRegions.size());
+        result.put("totalSRs", matched.size());
+        result.put("unallocatedShipments", unassigned);
+        result.put("allocationSummary", newSummary);
+        result.put("affinityScores", scores);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Ray-casting point-in-polygon.
+     * polygon is double[][] where each row is [lat, lng].
+     */
+    private boolean pointInPolygon(double lat, double lng, double[][] polygon) {
+        boolean inside = false;
+        int n = polygon.length;
+        for (int i = 0, j = n - 1; i < n; j = i++) {
+            double yi = polygon[i][0], xi = polygon[i][1];
+            double yj = polygon[j][0], xj = polygon[j][1];
+            if ((yi > lat) != (yj > lat) &&
+                    lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+                inside = !inside;
+            }
+        }
+        return inside;
     }
 }
