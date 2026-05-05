@@ -4,6 +4,8 @@ import com.example.LMrouting.dto.AllocationSummary;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.service.AffinityMatchingService;
 import com.example.LMrouting.service.AllocationEngineService;
+import com.example.LMrouting.service.PincodeClusteringService;
+import com.example.LMrouting.service.RouteOptimizerService;
 import com.example.LMrouting.store.InMemoryStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +33,8 @@ public class AffinityMatchingController {
 
     private final AffinityMatchingService affinityMatchingService;
     private final AllocationEngineService allocationEngineService;
+    private final PincodeClusteringService pincodeClusteringService;
+    private final RouteOptimizerService routeOptimizerService;
     private final InMemoryStore store;
 
     // In-memory affinity storage: srName → set of preferred pincodes
@@ -95,48 +99,72 @@ public class AffinityMatchingController {
 
         LocalDate date = AllocationController.parseDate(dateStr);
 
-        // Step 1: Run standard allocation
+        // Step 1: Run standard allocation first (to get filtered shipments + present SRs)
         AllocationSummary summary = allocationEngineService.allocate(date);
 
-        // Step 2: Get the current assignment from store
+        // Step 2: Get allocated shipments and present SRs
         String storeDateStr = summary.date();
         List<Shipment> allShipments = store.findShipmentsByDate(storeDateStr);
-        Map<String, List<Shipment>> currentAssignment = allShipments.stream()
+        List<Shipment> allocated = allShipments.stream()
                 .filter(s -> s.getAssignedSr() != null)
-                .collect(Collectors.groupingBy(Shipment::getAssignedSr, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.toList());
+        List<String> presentSRs = allocated.stream()
+                .map(Shipment::getAssignedSr).distinct().sorted()
+                .collect(Collectors.toList());
+        int numSRs = presentSRs.size();
 
-        // Step 3: Apply affinity matching
-        Map<String, List<Shipment>> matched;
-        if (srAffinities.isEmpty()) {
-            matched = currentAssignment;
-            log.info("AffinityMatch: no affinities defined, using standard assignment");
-        } else {
-            matched = affinityMatchingService.matchRoutesToSRs(currentAssignment, srAffinities);
+        // Step 3: Re-cluster using PINCODE boundaries instead of angular slices
+        List<List<Shipment>> pincodeClusters = pincodeClusteringService.clusterByPincode(allocated, numSRs);
 
-            // Step 4: Update shipments with new SR assignments
-            for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
-                String sr = entry.getKey();
-                for (Shipment s : entry.getValue()) {
-                    s.setAssignedSr(sr);
-                }
-            }
-            // Save back to store
-            List<Shipment> toSave = matched.values().stream()
-                    .flatMap(List::stream).collect(Collectors.toList());
-            store.saveShipments(storeDateStr, toSave);
+        // Step 4: Build assignment map (cluster index → SR name)
+        Map<String, List<Shipment>> pincodeAssignment = new LinkedHashMap<>();
+        for (int i = 0; i < pincodeClusters.size() && i < presentSRs.size(); i++) {
+            pincodeAssignment.put(presentSRs.get(i), pincodeClusters.get(i));
         }
 
-        // Step 5: Compute affinity scores
+        // Step 5: Apply affinity matching (re-assign routes to SRs based on pincode preference)
+        Map<String, List<Shipment>> matched;
+        if (srAffinities.isEmpty()) {
+            matched = pincodeAssignment;
+            log.info("AffinityMatch: pincode clustering done, no affinities → keeping cluster order");
+        } else {
+            matched = affinityMatchingService.matchRoutesToSRs(pincodeAssignment, srAffinities);
+            log.info("AffinityMatch: pincode clustering + affinity matching applied");
+        }
+
+        // Step 6: Sequence routes and update store
+        for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
+            String sr = entry.getKey();
+            List<Shipment> srShipments = entry.getValue();
+            // Optimize route sequence
+            List<Shipment> ordered = srShipments.size() >= 2
+                    ? routeOptimizerService.optimizeRoute(sr, srShipments)
+                    : new ArrayList<>(srShipments);
+            if (ordered.size() == 1) ordered.get(0).setRouteSequence(1);
+            // Update SR assignment
+            for (Shipment s : ordered) s.setAssignedSr(sr);
+            entry.setValue(ordered);
+        }
+
+        // Save to store
+        List<Shipment> toSave = matched.values().stream()
+                .flatMap(List::stream).collect(Collectors.toList());
+        store.saveShipments(storeDateStr, toSave);
+
+        // Step 7: Compute affinity scores
         Map<String, Map<String, Object>> scores = affinityMatchingService.computeAffinityScores(
                 matched, srAffinities);
+
+        // Rebuild summary from new assignment
+        AllocationSummary newSummary = allocationEngineService.getSummary(date);
 
         // Build response
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("date", storeDateStr);
-        result.put("mode", srAffinities.isEmpty() ? "standard" : "affinity");
+        result.put("mode", "affinity-pincode");
         result.put("affinitySRs", srAffinities.size());
         result.put("totalSRs", matched.size());
-        result.put("allocationSummary", summary);
+        result.put("allocationSummary", newSummary);
         result.put("affinityScores", scores);
         return ResponseEntity.ok(result);
     }
