@@ -84,9 +84,20 @@ public class PincodeBoundaryService {
                 }
 
                 if (!rings.isEmpty()) {
-                    pincodePolygons.put(pincode, rings);
-                    for (List<double[]> ring : rings) {
-                        allPolygons.add(new PincodePolygon(pincode, ring));
+                    // Filter: only keep rings with >10 points and not rectangular
+                    List<List<double[]>> realRings = rings.stream().filter(ring -> {
+                        if (ring.size() <= 10) return false;
+                        // Check if rectangular (only 2 unique lat + 2 unique lng)
+                        long uLats = ring.stream().mapToLong(c -> Math.round(c[1] * 10000)).distinct().count();
+                        long uLngs = ring.stream().mapToLong(c -> Math.round(c[0] * 10000)).distinct().count();
+                        return uLats > 2 || uLngs > 2;
+                    }).collect(java.util.stream.Collectors.toList());
+
+                    if (!realRings.isEmpty()) {
+                        pincodePolygons.put(pincode, realRings);
+                        for (List<double[]> ring : realRings) {
+                            allPolygons.add(new PincodePolygon(pincode, ring));
+                        }
                     }
                 }
             }
@@ -143,27 +154,10 @@ public class PincodeBoundaryService {
     public List<Map<String, Object>> getAllPolygonsAsGeoJson() {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map.Entry<String, List<List<double[]>>> entry : pincodePolygons.entrySet()) {
-            // Skip polygons with very few points (bounding boxes have 5 points)
-            List<List<double[]>> rings = entry.getValue();
-            boolean hasRealPolygon = rings.stream().anyMatch(r -> {
-                if (r.size() <= 6) return false;
-                // Check if it's a rectangle (only 2 unique lat + 2 unique lng = bounding box)
-                long uniqueLats = r.stream().mapToDouble(c -> Math.round(c[1] * 10000.0) / 10000.0).distinct().count();
-                long uniqueLngs = r.stream().mapToDouble(c -> Math.round(c[0] * 10000.0) / 10000.0).distinct().count();
-                return uniqueLats > 2 || uniqueLngs > 2;
-            });
-            if (!hasRealPolygon) continue;
-
             Map<String, Object> feature = new LinkedHashMap<>();
             feature.put("pincode", entry.getKey());
-            // Convert rings to [lat, lng] for Leaflet, skip tiny rings
             List<List<double[]>> leafletRings = new ArrayList<>();
-            for (List<double[]> ring : rings) {
-                if (ring.size() <= 6) continue;
-                // Skip rectangles
-                long uLats = ring.stream().mapToDouble(c -> Math.round(c[1] * 10000.0) / 10000.0).distinct().count();
-                long uLngs = ring.stream().mapToDouble(c -> Math.round(c[0] * 10000.0) / 10000.0).distinct().count();
-                if (uLats <= 2 && uLngs <= 2) continue;
+            for (List<double[]> ring : entry.getValue()) {
                 List<double[]> leafletRing = new ArrayList<>();
                 for (double[] coord : ring) {
                     leafletRing.add(new double[]{coord[1], coord[0]}); // [lat, lng]

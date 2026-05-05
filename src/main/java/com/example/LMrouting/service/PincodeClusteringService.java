@@ -88,29 +88,23 @@ public class PincodeClusteringService {
         // Sort by angle (geographic continuity)
         groups.sort(Comparator.comparingDouble(g -> g.angle));
 
-        // Step 3: Greedily assign pincode groups to N buckets
-        // Distribute pincodes contiguously, ensuring all buckets get shipments
-        int totalShipments = (int) groups.stream().mapToLong(g -> g.shipments.size()).sum();
-        int targetPerBucket = Math.max(1, totalShipments / numClusters);
-
+        // Step 3: Distribute pincode groups into N buckets evenly by shipment count
+        // Sort pincodes by angle for geographic continuity, then round-robin assign
+        // to ensure all buckets get shipments
         List<List<Shipment>> clusters = new ArrayList<>();
         for (int i = 0; i < numClusters; i++) clusters.add(new ArrayList<>());
 
-        int bucketIdx = 0;
-        for (int g = 0; g < groups.size(); g++) {
-            PincodeGroup group = groups.get(g);
-            clusters.get(bucketIdx).addAll(group.shipments);
-
-            // Move to next bucket if:
-            // - current bucket has enough shipments
-            // - there are enough remaining pincodes to fill remaining buckets
-            int remainingBuckets = numClusters - 1 - bucketIdx;
-            int remainingGroups = groups.size() - 1 - g;
-            if (clusters.get(bucketIdx).size() >= targetPerBucket
-                    && bucketIdx < numClusters - 1
-                    && remainingGroups > remainingBuckets) {
-                bucketIdx++;
+        // Simple round-robin by sorted angle order, but assign whole pincode groups
+        // to maintain geographic coherence within each cluster
+        int[] clusterSizes = new int[numClusters];
+        for (PincodeGroup group : groups) {
+            // Find the cluster with fewest shipments
+            int minIdx = 0;
+            for (int i = 1; i < numClusters; i++) {
+                if (clusterSizes[i] < clusterSizes[minIdx]) minIdx = i;
             }
+            clusters.get(minIdx).addAll(group.shipments);
+            clusterSizes[minIdx] += group.shipments.size();
         }
 
         // Distribute no-pincode shipments to nearest cluster

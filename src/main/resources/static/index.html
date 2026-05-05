@@ -725,12 +725,7 @@ function togglePincodeBoundaries() {
       data.polygons.forEach(function(p, i) {
         var color = colors[i % colors.length];
         p.rings.forEach(function(ring) {
-          // Skip bounding-box rectangles: detect by checking if polygon is axis-aligned
-          if (ring.length <= 10) return;
-          // Check if it's a rectangle (all points share only 2 unique lat and 2 unique lng values)
-          var lats = {}, lngs = {};
-          ring.forEach(function(pt) { lats[pt[0].toFixed(4)] = 1; lngs[pt[1].toFixed(4)] = 1; });
-          if (Object.keys(lats).length <= 2 && Object.keys(lngs).length <= 2) return;
+          if (ring.length <= 5) return; // safety check
           var poly = L.polygon(ring, {
             color: color,
             weight: 1.5,
@@ -1295,7 +1290,7 @@ function renderSrList(srSummaries) {
 
     h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
     h += '<div class="sr-dot" style="background:' + color + '"></div>';
-    h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + '</div>';
+    h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + (srAffinityMap[sr.srName] && srAffinityMap[sr.srName].length ? ' <span style="font-size:.65rem;color:#8e24aa;font-weight:400">(' + srAffinityMap[sr.srName].join(',') + ')</span>' : '') + '</div>';
     h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div></div>';
     h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
   });

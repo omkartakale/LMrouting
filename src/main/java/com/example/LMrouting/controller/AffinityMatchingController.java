@@ -4,6 +4,7 @@ import com.example.LMrouting.dto.AllocationSummary;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.service.AffinityMatchingService;
 import com.example.LMrouting.service.AllocationEngineService;
+import com.example.LMrouting.service.PincodeBoundaryService;
 import com.example.LMrouting.service.PincodeClusteringService;
 import com.example.LMrouting.service.RouteOptimizerService;
 import com.example.LMrouting.store.InMemoryStore;
@@ -34,6 +35,7 @@ public class AffinityMatchingController {
     private final AffinityMatchingService affinityMatchingService;
     private final AllocationEngineService allocationEngineService;
     private final PincodeClusteringService pincodeClusteringService;
+    private final PincodeBoundaryService pincodeBoundaryService;
     private final RouteOptimizerService routeOptimizerService;
     private final InMemoryStore store;
 
@@ -113,35 +115,130 @@ public class AffinityMatchingController {
                 .collect(Collectors.toList());
         int numSRs = presentSRs.size();
 
-        // Step 3: Re-cluster using PINCODE boundaries instead of angular slices
-        List<List<Shipment>> pincodeClusters = pincodeClusteringService.clusterByPincode(allocated, numSRs);
+        // Step 3: STRICT AFFINITY — assign shipments directly by pincode
+        // Each SR gets ONLY shipments from their affinity pincodes
+        Map<String, List<Shipment>> matched = new LinkedHashMap<>();
 
-        // Step 4: Build assignment map (cluster index → SR name)
-        Map<String, List<Shipment>> pincodeAssignment = new LinkedHashMap<>();
-        for (int i = 0; i < pincodeClusters.size() && i < presentSRs.size(); i++) {
-            pincodeAssignment.put(presentSRs.get(i), pincodeClusters.get(i));
-        }
+        if (!srAffinities.isEmpty()) {
+            // Strict mode: each SR gets only their affinity pincode shipments
+            // When multiple SRs share the same pincode, split using angular partitioning
+            Set<String> assignedShipmentIds = new HashSet<>();
 
-        // Step 5: Apply affinity matching (re-assign routes to SRs based on pincode preference)
-        Map<String, List<Shipment>> matched;
-        if (srAffinities.isEmpty()) {
-            matched = pincodeAssignment;
-            log.info("AffinityMatch: pincode clustering done, no affinities → keeping cluster order");
+            // Group SRs by their affinity pincode
+            Map<String, List<String>> pinToSRs = new LinkedHashMap<>();
+            for (String sr : presentSRs) {
+                Set<String> pins = srAffinities.getOrDefault(sr, Set.of());
+                for (String pin : pins) {
+                    pinToSRs.computeIfAbsent(pin, k -> new ArrayList<>()).add(sr);
+                }
+            }
+
+            // For each pincode, get its shipments and split among assigned SRs
+            for (Map.Entry<String, List<String>> entry : pinToSRs.entrySet()) {
+                String pincode = entry.getKey();
+                List<String> srsForPin = entry.getValue();
+
+                // Get shipments in this pincode using GeoJSON point-in-polygon
+                List<Shipment> pinShipments = allocated.stream()
+                        .filter(s -> !assignedShipmentIds.contains(s.getShippingId()))
+                        .filter(s -> {
+                            String realPin = pincodeBoundaryService.findPincodeForPoint(
+                                    s.getDropLatitude(), s.getDropLongitude());
+                            return pincode.equals(realPin);
+                        })
+                        .collect(Collectors.toList());
+
+                if (pinShipments.isEmpty()) continue;
+
+                if (srsForPin.size() == 1) {
+                    // Single SR for this pincode — assign all
+                    String sr = srsForPin.get(0);
+                    matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(pinShipments);
+                    pinShipments.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
+                    log.info("AffinityMatch: {} → {} shipments in pincode {}", sr, pinShipments.size(), pincode);
+                } else {
+                    // Multiple SRs share this pincode — split using angular partitioning from hub
+                    List<Shipment> sorted = pinShipments.stream()
+                            .sorted(Comparator.comparingDouble(s ->
+                                    Math.atan2(s.getDropLongitude() - 73.8884305, s.getDropLatitude() - 18.4600561)))
+                            .collect(Collectors.toList());
+
+                    int perSR = sorted.size() / srsForPin.size();
+                    int remainder = sorted.size() % srsForPin.size();
+                    int idx = 0;
+                    for (int i = 0; i < srsForPin.size(); i++) {
+                        String sr = srsForPin.get(i);
+                        int count = perSR + (i < remainder ? 1 : 0);
+                        List<Shipment> srSlice = sorted.subList(idx, Math.min(idx + count, sorted.size()));
+                        matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(srSlice);
+                        srSlice.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
+                        idx += count;
+                        log.info("AffinityMatch: {} → {} shipments in pincode {} (shared, angular split)",
+                                sr, srSlice.size(), pincode);
+                    }
+                }
+            }
+
+            // Ensure all present SRs have an entry
+            for (String sr : presentSRs) {
+                matched.putIfAbsent(sr, new ArrayList<>());
+            }
+
+            // Remaining shipments (not in any affinity pincode)
+            List<Shipment> unassigned = allocated.stream()
+                    .filter(s -> !assignedShipmentIds.contains(s.getShippingId()))
+                    .collect(Collectors.toList());
+
+            if (!unassigned.isEmpty()) {
+                // Distribute remaining shipments evenly across ALL SRs (round-robin to least loaded)
+                // Respect capacity limit of 100 per SR
+                List<String> allSRsSorted = new ArrayList<>(presentSRs);
+                for (Shipment s : unassigned) {
+                    // Find SR with fewest shipments that hasn't hit capacity
+                    String leastLoaded = allSRsSorted.stream()
+                            .filter(sr -> matched.getOrDefault(sr, List.of()).size() < 100)
+                            .min(Comparator.comparingInt(sr -> matched.getOrDefault(sr, List.of()).size()))
+                            .orElse(null);
+                    if (leastLoaded == null) break; // all SRs at capacity
+                    matched.get(leastLoaded).add(s);
+                }
+                log.info("AffinityMatch: {} unassigned shipments distributed evenly across {} SRs (cap 100)",
+                        unassigned.size(), allSRsSorted.size());
+            }
+
+            // Enforce capacity cap: trim any SR over 100
+            for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
+                if (entry.getValue().size() > 100) {
+                    List<Shipment> excess = new ArrayList<>(entry.getValue().subList(100, entry.getValue().size()));
+                    entry.setValue(new ArrayList<>(entry.getValue().subList(0, 100)));
+                    // Redistribute excess to under-capacity SRs
+                    for (Shipment s : excess) {
+                        String target = presentSRs.stream()
+                                .filter(sr -> matched.get(sr).size() < 100)
+                                .min(Comparator.comparingInt(sr -> matched.get(sr).size()))
+                                .orElse(null);
+                        if (target != null) matched.get(target).add(s);
+                    }
+                }
+            }
         } else {
-            matched = affinityMatchingService.matchRoutesToSRs(pincodeAssignment, srAffinities);
-            log.info("AffinityMatch: pincode clustering + affinity matching applied");
+            // No affinity defined — use pincode clustering
+            List<List<Shipment>> pincodeClusters = pincodeClusteringService.clusterByPincode(allocated, numSRs);
+            for (int i = 0; i < pincodeClusters.size() && i < presentSRs.size(); i++) {
+                matched.put(presentSRs.get(i), pincodeClusters.get(i));
+            }
+            log.info("AffinityMatch: no affinities, using pincode clustering");
         }
 
-        // Step 6: Sequence routes and update store
+        // Step 4: Sequence routes and update store
         for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
             String sr = entry.getKey();
             List<Shipment> srShipments = entry.getValue();
-            // Optimize route sequence
+            if (srShipments.isEmpty()) continue;
             List<Shipment> ordered = srShipments.size() >= 2
                     ? routeOptimizerService.optimizeRoute(sr, srShipments)
                     : new ArrayList<>(srShipments);
             if (ordered.size() == 1) ordered.get(0).setRouteSequence(1);
-            // Update SR assignment
             for (Shipment s : ordered) s.setAssignedSr(sr);
             entry.setValue(ordered);
         }
@@ -151,17 +248,17 @@ public class AffinityMatchingController {
                 .flatMap(List::stream).collect(Collectors.toList());
         store.saveShipments(storeDateStr, toSave);
 
-        // Step 7: Compute affinity scores
+        // Step 5: Compute affinity scores
         Map<String, Map<String, Object>> scores = affinityMatchingService.computeAffinityScores(
                 matched, srAffinities);
 
-        // Rebuild summary from new assignment
+        // Rebuild summary
         AllocationSummary newSummary = allocationEngineService.getSummary(date);
 
         // Build response
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("date", storeDateStr);
-        result.put("mode", "affinity-pincode");
+        result.put("mode", "affinity-strict");
         result.put("affinitySRs", srAffinities.size());
         result.put("totalSRs", matched.size());
         result.put("allocationSummary", newSummary);
