@@ -84,14 +84,12 @@ public class PincodeBoundaryService {
                 }
 
                 if (!rings.isEmpty()) {
-                    // Filter: only keep rings with >10 points and not rectangular
-                    List<List<double[]>> realRings = rings.stream().filter(ring -> {
-                        if (ring.size() <= 10) return false;
-                        // Check if rectangular (only 2 unique lat + 2 unique lng)
-                        long uLats = ring.stream().mapToLong(c -> Math.round(c[1] * 10000)).distinct().count();
-                        long uLngs = ring.stream().mapToLong(c -> Math.round(c[0] * 10000)).distinct().count();
-                        return uLats > 2 || uLngs > 2;
-                    }).collect(java.util.stream.Collectors.toList());
+                    // Keep all rings with at least 4 points (minimum for a valid polygon).
+                    // Do NOT filter out "rectangular" rings — the GeoJSON file contains
+                    // real administrative boundaries that may have few vertices.
+                    List<List<double[]>> realRings = rings.stream()
+                            .filter(ring -> ring.size() >= 4)
+                            .collect(java.util.stream.Collectors.toList());
 
                     if (!realRings.isEmpty()) {
                         pincodePolygons.put(pincode, realRings);

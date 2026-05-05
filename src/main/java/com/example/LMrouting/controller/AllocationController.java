@@ -84,8 +84,9 @@ public class AllocationController {
     /**
      * Get the ORS (OpenStreetMap) road polyline for an SR's route.
      * GET /api/allocate/{date}/sr/{srName}/polyline/ors
+     * GET /api/allocate/{date}/sr/{srName}/polyline/osm  (alias)
      */
-    @GetMapping("/{date}/sr/{srName}/polyline/ors")
+    @GetMapping({"/{date}/sr/{srName}/polyline/ors", "/{date}/sr/{srName}/polyline/osm"})
     public ResponseEntity<List<double[]>> getSrOrsPolyline(@PathVariable("date") String dateStr,
                                                             @PathVariable("srName") String srName) {
         List<double[]> polyline = allocationEngineService.getOrsPolyline(parseDate(dateStr), srName);

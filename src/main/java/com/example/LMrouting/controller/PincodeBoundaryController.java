@@ -24,6 +24,26 @@ public class PincodeBoundaryController {
         return result;
     }
 
+    /** Get the exact GeoJSON polygon rings for a single pincode (for map highlighting). */
+    @GetMapping("/{pincode}")
+    public Map<String, Object> getPincodePolygon(@PathVariable String pincode) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("pincode", pincode);
+        List<List<double[]>> rings = pincodeBoundaryService.getPolygonForPincode(pincode);
+        // Convert [lng,lat] → [lat,lng] for Leaflet
+        List<List<double[]>> leafletRings = new ArrayList<>();
+        for (List<double[]> ring : rings) {
+            List<double[]> leafletRing = new ArrayList<>();
+            for (double[] coord : ring) {
+                leafletRing.add(new double[]{coord[1], coord[0]}); // [lat, lng]
+            }
+            leafletRings.add(leafletRing);
+        }
+        result.put("rings", leafletRings);
+        result.put("found", !rings.isEmpty());
+        return result;
+    }
+
     /** Check if a point is inside the service area. */
     @GetMapping("/check")
     public Map<String, Object> checkPoint(@RequestParam double lat, @RequestParam double lng) {
