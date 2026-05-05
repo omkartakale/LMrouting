@@ -228,12 +228,15 @@ public class RegionDensityAnalyzer {
 
     /**
      * Filters regions to only include those within the hub boundary.
-     * 
+     *
      * A region is considered within the hub boundary if:
-     * 1. Hub boundary is available
-     * 2. At least one corner of the region's bounding box is within the hub boundary polygon
-     * 
-     * If hub boundary is not available, all regions are returned (no filtering).
+     * 1. Hub boundary is available AND
+     * 2. The region's bounding box overlaps with the hub boundary polygon
+     *    (any corner inside, OR the region center inside, OR the hub centroid inside the region)
+     *
+     * If hub boundary is not available, OR if filtering would remove ALL regions
+     * (which indicates a coordinate mismatch rather than truly out-of-boundary data),
+     * all regions are returned unfiltered.
      */
     private List<AffinityRegion> filterRegionsWithinHubBoundary(List<AffinityRegion> regions, String hubName) {
         // Fetch hub boundary
@@ -244,42 +247,74 @@ public class RegionDensityAnalyzer {
             return regions;
         }
 
-        log.info("RegionDensaryAnalyzer: filtering regions using hub boundary with {} points", 
+        log.info("RegionDensityAnalyzer: filtering regions using hub boundary with {} points",
                  hubBoundary.coordinates().size());
 
         // Filter regions
-        return regions.stream()
+        List<AffinityRegion> filtered = regions.stream()
                 .filter(region -> isRegionWithinHubBoundary(region, hubBoundary.coordinates()))
                 .collect(Collectors.toList());
+
+        // Safety fallback: if boundary filtering removed ALL regions, the shipment coordinates
+        // likely don't align with the stored hub boundary polygon (e.g. different CRS, slight
+        // offset, or boundary data mismatch). Return all regions so the user can still work.
+        if (filtered.isEmpty() && !regions.isEmpty()) {
+            log.warn("RegionDensityAnalyzer: hub boundary filtering removed all {} regions for hub '{}'. " +
+                     "Returning all regions unfiltered to avoid empty result. " +
+                     "Check that shipment coordinates match the hub boundary polygon.",
+                     regions.size(), hubName);
+            return regions;
+        }
+
+        return filtered;
     }
 
     /**
      * Checks if a region intersects with the hub boundary.
-     * 
-     * Strategy: Check if any corner of the region's bounding box is inside the hub boundary polygon.
-     * If at least one corner is inside, the region is considered to intersect.
+     *
+     * Strategy (most-lenient-first):
+     * 1. Any corner of the region bounding box is inside the hub polygon
+     * 2. The region center is inside the hub polygon
+     * 3. The hub polygon centroid is inside the region bounding box
+     *    (handles the case where the hub is large and fully contains the region)
      */
     private boolean isRegionWithinHubBoundary(AffinityRegion region, List<double[]> hubBoundary) {
         // Parse region boundary coordinates
         List<double[]> regionCorners = parseBoundaryCoordinates(region.getBoundaryCoordinates());
         if (regionCorners.isEmpty()) {
-            log.debug("RegionDensityAnalyzer: region '{}' has no valid boundary coordinates, excluding", 
+            log.debug("RegionDensityAnalyzer: region '{}' has no valid boundary coordinates, excluding",
                       region.getPincode());
             return false;
         }
 
-        // Check if any corner is inside the hub boundary
+        // Check 1: any corner of the region is inside the hub polygon
         for (double[] corner : regionCorners) {
             if (isPointInPolygon(corner[0], corner[1], hubBoundary)) {
                 return true;
             }
         }
 
-        // Also check if the region center is inside
+        // Check 2: region center is inside the hub polygon
         double centerLat = regionCorners.stream().mapToDouble(c -> c[0]).average().orElse(0.0);
         double centerLng = regionCorners.stream().mapToDouble(c -> c[1]).average().orElse(0.0);
-        
-        return isPointInPolygon(centerLat, centerLng, hubBoundary);
+        if (isPointInPolygon(centerLat, centerLng, hubBoundary)) {
+            return true;
+        }
+
+        // Check 3: hub polygon centroid is inside the region bounding box
+        // (covers the case where the hub boundary is large and the region is fully inside)
+        double hubCentroidLat = hubBoundary.stream().mapToDouble(p -> p[0]).average().orElse(0.0);
+        double hubCentroidLng = hubBoundary.stream().mapToDouble(p -> p[1]).average().orElse(0.0);
+        double minLat = regionCorners.stream().mapToDouble(c -> c[0]).min().orElse(0.0);
+        double maxLat = regionCorners.stream().mapToDouble(c -> c[0]).max().orElse(0.0);
+        double minLng = regionCorners.stream().mapToDouble(c -> c[1]).min().orElse(0.0);
+        double maxLng = regionCorners.stream().mapToDouble(c -> c[1]).max().orElse(0.0);
+        if (hubCentroidLat >= minLat && hubCentroidLat <= maxLat &&
+                hubCentroidLng >= minLng && hubCentroidLng <= maxLng) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
