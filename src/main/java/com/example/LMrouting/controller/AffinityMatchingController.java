@@ -138,42 +138,40 @@ public class AffinityMatchingController {
                 String pincode = entry.getKey();
                 List<String> srsForPin = entry.getValue();
 
-                // Get shipments in this pincode using GeoJSON point-in-polygon
+                // Get shipments in this pincode (dropPincode is always from GeoJSON)
                 List<Shipment> pinShipments = allocated.stream()
                         .filter(s -> !assignedShipmentIds.contains(s.getShippingId()))
-                        .filter(s -> {
-                            String realPin = pincodeBoundaryService.findPincodeForPoint(
-                                    s.getDropLatitude(), s.getDropLongitude());
-                            return pincode.equals(realPin);
-                        })
+                        .filter(s -> pincode.equals(s.getDropPincode()))
                         .collect(Collectors.toList());
 
                 if (pinShipments.isEmpty()) continue;
 
                 if (srsForPin.size() == 1) {
-                    // Single SR for this pincode — assign all
+                    // Single SR for this pincode — assign up to 100
                     String sr = srsForPin.get(0);
-                    matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(pinShipments);
-                    pinShipments.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
-                    log.info("AffinityMatch: {} → {} shipments in pincode {}", sr, pinShipments.size(), pincode);
+                    List<Shipment> capped = pinShipments.size() > 100
+                            ? pinShipments.subList(0, 100) : pinShipments;
+                    matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(capped);
+                    capped.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
+                    log.info("AffinityMatch: {} → {} shipments in pincode {} (cap 100)", sr, capped.size(), pincode);
                 } else {
-                    // Multiple SRs share this pincode — split using angular partitioning from hub
+                    // Multiple SRs share this pincode — split using angular partitioning, cap 100 each
                     List<Shipment> sorted = pinShipments.stream()
                             .sorted(Comparator.comparingDouble(s ->
                                     Math.atan2(s.getDropLongitude() - 73.8884305, s.getDropLatitude() - 18.4600561)))
                             .collect(Collectors.toList());
 
-                    int perSR = sorted.size() / srsForPin.size();
-                    int remainder = sorted.size() % srsForPin.size();
+                    int perSR = Math.min(100, sorted.size() / srsForPin.size());
                     int idx = 0;
                     for (int i = 0; i < srsForPin.size(); i++) {
                         String sr = srsForPin.get(i);
-                        int count = perSR + (i < remainder ? 1 : 0);
-                        List<Shipment> srSlice = sorted.subList(idx, Math.min(idx + count, sorted.size()));
+                        int end = Math.min(idx + perSR, sorted.size());
+                        if (i == srsForPin.size() - 1) end = Math.min(idx + 100, sorted.size()); // last SR gets remainder up to 100
+                        List<Shipment> srSlice = new ArrayList<>(sorted.subList(idx, end));
                         matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(srSlice);
                         srSlice.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
-                        idx += count;
-                        log.info("AffinityMatch: {} → {} shipments in pincode {} (shared, angular split)",
+                        idx = end;
+                        log.info("AffinityMatch: {} → {} shipments in pincode {} (shared, cap 100)",
                                 sr, srSlice.size(), pincode);
                     }
                 }
@@ -190,36 +188,9 @@ public class AffinityMatchingController {
                     .collect(Collectors.toList());
 
             if (!unassigned.isEmpty()) {
-                // Distribute remaining shipments evenly across ALL SRs (round-robin to least loaded)
-                // Respect capacity limit of 100 per SR
-                List<String> allSRsSorted = new ArrayList<>(presentSRs);
-                for (Shipment s : unassigned) {
-                    // Find SR with fewest shipments that hasn't hit capacity
-                    String leastLoaded = allSRsSorted.stream()
-                            .filter(sr -> matched.getOrDefault(sr, List.of()).size() < 100)
-                            .min(Comparator.comparingInt(sr -> matched.getOrDefault(sr, List.of()).size()))
-                            .orElse(null);
-                    if (leastLoaded == null) break; // all SRs at capacity
-                    matched.get(leastLoaded).add(s);
-                }
-                log.info("AffinityMatch: {} unassigned shipments distributed evenly across {} SRs (cap 100)",
-                        unassigned.size(), allSRsSorted.size());
-            }
-
-            // Enforce capacity cap: trim any SR over 100
-            for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
-                if (entry.getValue().size() > 100) {
-                    List<Shipment> excess = new ArrayList<>(entry.getValue().subList(100, entry.getValue().size()));
-                    entry.setValue(new ArrayList<>(entry.getValue().subList(0, 100)));
-                    // Redistribute excess to under-capacity SRs
-                    for (Shipment s : excess) {
-                        String target = presentSRs.stream()
-                                .filter(sr -> matched.get(sr).size() < 100)
-                                .min(Comparator.comparingInt(sr -> matched.get(sr).size()))
-                                .orElse(null);
-                        if (target != null) matched.get(target).add(s);
-                    }
-                }
+                // STRICT: unassigned shipments stay unallocated — don't pollute affinity
+                log.info("AffinityMatch STRICT: {} shipments not in any affinity pincode → left unallocated",
+                        unassigned.size());
             }
         } else {
             // No affinity defined — use pincode clustering

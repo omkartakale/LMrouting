@@ -112,7 +112,7 @@ public class AffinityMatchingService {
      * Count how many shipments in a route fall within the given pincodes.
      */
     private int countShipmentsInPincodes(List<Shipment> shipments, Set<String> pincodes) {
-        if (shipments == null || pincodes == null) return 0;
+        if (shipments == null || pincodes == null || pincodes.isEmpty()) return 0;
         return (int) shipments.stream()
                 .filter(s -> s.getDropPincode() != null && pincodes.contains(s.getDropPincode()))
                 .count();

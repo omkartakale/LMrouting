@@ -503,10 +503,8 @@ public class CsvIngestionService {
                 .distanceFromHubKm(distKm)
                 .build();
 
-        // Enrich pincode from boundary GeoJSON if missing or empty
-        if ((s.getDropPincode() == null || s.getDropPincode().isBlank())
-                && lat != 0.0 && lng != 0.0
-                && pincodeBoundaryService.isLoaded()) {
+        // Always resolve pincode from GeoJSON boundary (overrides CSV value for consistency)
+        if (lat != 0.0 && lng != 0.0 && pincodeBoundaryService.isLoaded()) {
             String resolved = pincodeBoundaryService.findPincodeForPoint(lat, lng);
             if (resolved != null) {
                 s.setDropPincode(resolved);
