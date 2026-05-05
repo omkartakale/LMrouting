@@ -68,7 +68,7 @@ public class CsvIngestionService {
             m.put(s, "drop_longitude");
         // drop_pincode
         for (String s : new String[]{"pincode","pin_code","zip","zip_code","postal_code",
-                "delivery_pincode","drop_pin","customer_pincode"})
+                "delivery_pincode","drop_pin","customer_pincode","droppincode","drop_pincode_value"})
             m.put(s, "drop_pincode");
         // shipment_flow
         for (String s : new String[]{"flow","type","shipment_type","delivery_type",
@@ -100,6 +100,10 @@ public class CsvIngestionService {
         // (values: "Delivery" → treated as Forward, "Reverse" → treated as Reverse)
         for (String s : new String[]{"shipmenttype","shipment_type_locus","deliverytype"})
             m.put(s, "shipment_flow");
+        // sr_name
+        for (String s : new String[]{"srname","sr_id","srid","delivery_user_id","deliveryuserid",
+                "rider","rider_name","rider_id","delivery_boy","delivery_agent"})
+            m.put(s, "sr_name");
         COLUMN_ALIASES = Collections.unmodifiableMap(m);
     }
 
@@ -108,6 +112,7 @@ public class CsvIngestionService {
     @Value("${hub.max.distance.km:50.0}") private double maxDistanceKm;
 
     private final InMemoryStore store;
+    private final PincodeBoundaryService pincodeBoundaryService;
 
     // =========================================================================
     // Public API
@@ -497,6 +502,16 @@ public class CsvIngestionService {
                 .outOfRange(outOfRange)
                 .distanceFromHubKm(distKm)
                 .build();
+
+        // Enrich pincode from boundary GeoJSON if missing or empty
+        if ((s.getDropPincode() == null || s.getDropPincode().isBlank())
+                && lat != 0.0 && lng != 0.0
+                && pincodeBoundaryService.isLoaded()) {
+            String resolved = pincodeBoundaryService.findPincodeForPoint(lat, lng);
+            if (resolved != null) {
+                s.setDropPincode(resolved);
+            }
+        }
 
         return warning != null ? ParseResult.withWarning(s, warning) : ParseResult.ok(s);
     }

@@ -52,6 +52,7 @@ public class AllocationEngineService {
     private final RouteOptimizerService routeOptimizerService;
     private final ScoreWeights scoreWeights;
     private final HubBoundaryService hubBoundaryService;
+    private final PincodeBoundaryService pincodeBoundaryService;
 
     @Value("${hub.name:PNQ HDP}")
     private String hubName;
@@ -170,6 +171,23 @@ public class AllocationEngineService {
             outsideBoundary = withCoords.size() - withinBoundary.size();
             log.info("Boundary filter (radius fallback): excluded {} shipments beyond {}km",
                     outsideBoundary, allocationBoundaryKmFallback);
+        }
+
+        // ── Filter 3: pincode boundary (GeoJSON polygon-based) ────────────────
+        // If pincode boundary data is loaded, additionally filter shipments
+        // that fall outside any known serviceable pincode polygon.
+        // This catches shipments with valid coordinates but wrong pincode area.
+        if (pincodeBoundaryService.isLoaded()) {
+            int beforePincodeFilter = withinBoundary.size();
+            withinBoundary = withinBoundary.stream()
+                    .filter(s -> pincodeBoundaryService.isInsideServiceArea(
+                            s.getDropLatitude(), s.getDropLongitude()))
+                    .collect(Collectors.toList());
+            int excludedByPincode = beforePincodeFilter - withinBoundary.size();
+            if (excludedByPincode > 0) {
+                log.info("Pincode boundary filter: excluded {} shipments outside known pincode areas",
+                        excludedByPincode);
+            }
         }
 
         List<String> presentSrs = store.getPresentSrNames(date);
