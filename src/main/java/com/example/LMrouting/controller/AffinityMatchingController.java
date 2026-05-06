@@ -42,8 +42,11 @@ public class AffinityMatchingController {
     // In-memory affinity storage: srName → set of preferred pincodes
     private final Map<String, Set<String>> srAffinities = new LinkedHashMap<>();
 
-    // In-memory custom region storage: srName → polygon ring as [lat,lng] pairs
+    // In-memory custom region storage: regionName → polygon ring as [lat,lng] pairs
     private final Map<String, double[][]> customRegions = new LinkedHashMap<>();
+
+    // User-specified SR count per region: regionName → number of SRs to assign
+    private final Map<String, Integer> customRegionSrCounts = new LinkedHashMap<>();
 
     /**
      * Set/update SR affinities.
@@ -150,31 +153,31 @@ public class AffinityMatchingController {
                 if (pinShipments.isEmpty()) continue;
 
                 if (srsForPin.size() == 1) {
-                    // Single SR for this pincode — assign up to 100
+                    // Single SR for this pincode — assign up to 80
                     String sr = srsForPin.get(0);
-                    List<Shipment> capped = pinShipments.size() > 100
-                            ? pinShipments.subList(0, 100) : pinShipments;
+                    List<Shipment> capped = pinShipments.size() > 80
+                            ? pinShipments.subList(0, 80) : pinShipments;
                     matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(capped);
                     capped.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
-                    log.info("AffinityMatch: {} → {} shipments in pincode {} (cap 100)", sr, capped.size(), pincode);
+                    log.info("AffinityMatch: {} → {} shipments in pincode {} (cap 80)", sr, capped.size(), pincode);
                 } else {
-                    // Multiple SRs share this pincode — split using angular partitioning, cap 100 each
+                    // Multiple SRs share this pincode — split using angular partitioning, cap 80 each
                     List<Shipment> sorted = pinShipments.stream()
                             .sorted(Comparator.comparingDouble(s ->
                                     Math.atan2(s.getDropLongitude() - 73.8884305, s.getDropLatitude() - 18.4600561)))
                             .collect(Collectors.toList());
 
-                    int perSR = Math.min(100, sorted.size() / srsForPin.size());
+                    int perSR = Math.min(80, sorted.size() / srsForPin.size());
                     int idx = 0;
                     for (int i = 0; i < srsForPin.size(); i++) {
                         String sr = srsForPin.get(i);
                         int end = Math.min(idx + perSR, sorted.size());
-                        if (i == srsForPin.size() - 1) end = Math.min(idx + 100, sorted.size()); // last SR gets remainder up to 100
+                        if (i == srsForPin.size() - 1) end = Math.min(idx + 80, sorted.size()); // last SR gets remainder up to 80
                         List<Shipment> srSlice = new ArrayList<>(sorted.subList(idx, end));
                         matched.computeIfAbsent(sr, k -> new ArrayList<>()).addAll(srSlice);
                         srSlice.forEach(s -> assignedShipmentIds.add(s.getShippingId()));
                         idx = end;
-                        log.info("AffinityMatch: {} → {} shipments in pincode {} (shared, cap 100)",
+                        log.info("AffinityMatch: {} → {} shipments in pincode {} (shared, cap 80)",
                                 sr, srSlice.size(), pincode);
                     }
                 }
@@ -311,10 +314,13 @@ public class AffinityMatchingController {
     // =========================================================================
 
     /**
-     * Store custom polygon regions for each SR.
+     * Store custom polygon regions (numbered, not SR-tied).
      *
      * POST /api/affinity-match/set-custom-regions
-     * Body: { "regions": { "SR-001": [[lat,lng], [lat,lng], ...], "SR-002": [...] } }
+     * Body: { "regions": { "Region 1": [[lat,lng],...], "Region 2": [...] } }
+     *
+     * Regions are keyed by name (e.g. "Region 1", "Region 2").
+     * SR assignment is done automatically during allocation based on shipment density.
      */
     @PostMapping("/set-custom-regions")
     public ResponseEntity<Map<String, Object>> setCustomRegions(@RequestBody Map<String, Object> request) {
@@ -327,25 +333,42 @@ public class AffinityMatchingController {
         }
 
         customRegions.clear();
+        customRegionSrCounts.clear();
+
         for (Map.Entry<String, List<List<Double>>> entry : regions.entrySet()) {
-            String srName = entry.getKey();
+            String regionName = entry.getKey();
             List<List<Double>> polygon = entry.getValue();
             if (polygon != null && polygon.size() >= 3) {
-                // Convert to double[][] for storage
                 double[][] ring = polygon.stream()
                         .map(pt -> new double[]{pt.get(0), pt.get(1)})
                         .toArray(double[][]::new);
-                customRegions.put(srName, ring);
+                customRegions.put(regionName, ring);
             }
         }
 
-        log.info("AffinityMatch: stored custom regions for {} SRs", customRegions.size());
-        return ResponseEntity.ok(Map.of("success", true, "srCount", customRegions.size()));
+        // Store user-specified SR counts per region (optional)
+        @SuppressWarnings("unchecked")
+        Map<String, Object> srCountsRaw = (Map<String, Object>) request.get("srCounts");
+        if (srCountsRaw != null) {
+            for (Map.Entry<String, Object> entry : srCountsRaw.entrySet()) {
+                if (entry.getValue() instanceof Number) {
+                    int count = ((Number) entry.getValue()).intValue();
+                    if (count > 0) customRegionSrCounts.put(entry.getKey(), count);
+                }
+            }
+        }
+
+        log.info("AffinityMatch: stored {} custom regions, SR counts: {}", customRegions.size(), customRegionSrCounts);
+        return ResponseEntity.ok(Map.of("success", true, "regionCount", customRegions.size(),
+                "srCountsProvided", customRegionSrCounts.size()));
     }
 
     /**
      * Run allocation using custom drawn polygon regions.
-     * Each SR gets ONLY shipments whose coordinates fall inside their drawn polygon.
+     *
+     * Regions are numbered (not SR-tied). SRs are assigned to regions proportionally
+     * based on shipment density: regions with more shipments get more SRs.
+     * Each SR is assigned to exactly one region and receives only shipments from that region.
      *
      * POST /api/affinity-match/allocate-custom
      * Body: { "date": "24-Mar-26" }
@@ -372,52 +395,162 @@ public class AffinityMatchingController {
         List<Shipment> allocated = allShipments.stream()
                 .filter(s -> s.getAssignedSr() != null)
                 .collect(Collectors.toList());
-        List<String> presentSRs = allocated.stream()
-                .map(Shipment::getAssignedSr).distinct().sorted()
-                .collect(Collectors.toList());
+        List<String> presentSRs = store.getPresentSrNames(date);
+        int numSRs = presentSRs.size();
 
-        // Step 2: Assign shipments using point-in-polygon against custom regions
-        Map<String, List<Shipment>> matched = new LinkedHashMap<>();
+        // Step 2: Count shipments per region
+        List<String> regionNames = new ArrayList<>(customRegions.keySet());
+        Map<String, List<Shipment>> shipmentsByRegion = new LinkedHashMap<>();
         Set<String> assignedIds = new HashSet<>();
 
-        for (String sr : presentSRs) {
-            matched.put(sr, new ArrayList<>());
-        }
-
-        for (Map.Entry<String, double[][]> entry : customRegions.entrySet()) {
-            String sr = entry.getKey();
-            double[][] polygon = entry.getValue();
-
-            if (!matched.containsKey(sr)) continue; // SR not present today
-
+        for (String regionName : regionNames) {
+            double[][] polygon = customRegions.get(regionName);
             List<Shipment> inRegion = allocated.stream()
                     .filter(s -> !assignedIds.contains(s.getShippingId()))
                     .filter(s -> pointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
                     .collect(Collectors.toList());
-
-            // Enforce 100-shipment cap — sort by payout descending to keep highest-value deliveries
-            List<Shipment> capped = inRegion.size() > 100
-                    ? inRegion.stream()
-                        .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed())
-                        .limit(100)
-                        .collect(Collectors.toList())
-                    : inRegion;
-
-            matched.get(sr).addAll(capped);
-            capped.forEach(s -> assignedIds.add(s.getShippingId()));
-            log.info("AffinityMatch custom: {} → {} shipments in drawn region ({}  in polygon, capped at 100)",
-                    sr, capped.size(), inRegion.size());
+            shipmentsByRegion.put(regionName, inRegion);
+            inRegion.forEach(s -> assignedIds.add(s.getShippingId()));
+            log.info("AffinityMatch custom: region '{}' contains {} shipments", regionName, inRegion.size());
         }
 
-        // Unassigned shipments stay unallocated (strict custom region mode)
+        // Step 3: Assign SRs to regions — use user-specified counts if provided,
+        // otherwise fall back to proportional allocation by shipment density.
+        Map<String, List<String>> regionToSRs = new LinkedHashMap<>();
+        for (String r : regionNames) regionToSRs.put(r, new ArrayList<>());
+
+        if (numSRs > 0) {
+            // Determine how many SRs each region gets
+            int[] targetCounts = new int[regionNames.size()];
+            int explicitTotal = 0;
+
+            // First pass: apply user-specified counts
+            for (int i = 0; i < regionNames.size(); i++) {
+                String regionName = regionNames.get(i);
+                Integer specified = customRegionSrCounts.get(regionName);
+                if (specified != null && specified > 0) {
+                    targetCounts[i] = specified;
+                    explicitTotal += specified;
+                }
+            }
+
+            // Second pass: distribute remaining SRs proportionally to regions without explicit counts
+            int remainingSRs = numSRs - explicitTotal;
+            if (remainingSRs < 0) {
+                log.warn("AffinityMatch custom: explicit SR counts ({}) exceed present SRs ({}), capping", explicitTotal, numSRs);
+                // Scale down proportionally
+                double scale = (double) numSRs / explicitTotal;
+                int assigned = 0;
+                for (int i = 0; i < regionNames.size(); i++) {
+                    if (customRegionSrCounts.containsKey(regionNames.get(i))) {
+                        targetCounts[i] = Math.max(1, (int) Math.floor(targetCounts[i] * scale));
+                        assigned += targetCounts[i];
+                    }
+                }
+                remainingSRs = numSRs - assigned;
+            }
+
+            // Proportional distribution for regions without explicit counts
+            List<Integer> unspecifiedIndices = new ArrayList<>();
+            int totalUnspecifiedShipments = 0;
+            for (int i = 0; i < regionNames.size(); i++) {
+                if (!customRegionSrCounts.containsKey(regionNames.get(i))) {
+                    unspecifiedIndices.add(i);
+                    totalUnspecifiedShipments += shipmentsByRegion.get(regionNames.get(i)).size();
+                }
+            }
+
+            if (!unspecifiedIndices.isEmpty() && remainingSRs > 0) {
+                double[] fractions = new double[unspecifiedIndices.size()];
+                int[] floors = new int[unspecifiedIndices.size()];
+                int floorTotal = 0;
+                for (int k = 0; k < unspecifiedIndices.size(); k++) {
+                    int idx = unspecifiedIndices.get(k);
+                    double proportion = totalUnspecifiedShipments > 0
+                            ? (double) shipmentsByRegion.get(regionNames.get(idx)).size() / totalUnspecifiedShipments
+                            : 1.0 / unspecifiedIndices.size();
+                    fractions[k] = proportion * remainingSRs;
+                    floors[k] = (int) fractions[k];
+                    floorTotal += floors[k];
+                }
+                // Distribute remainder by largest fractional part
+                int leftover = remainingSRs - floorTotal;
+                Integer[] order = new Integer[unspecifiedIndices.size()];
+                for (int k = 0; k < order.length; k++) order[k] = k;
+                Arrays.sort(order, (a, b) -> Double.compare(fractions[b] - floors[b], fractions[a] - floors[a]));
+                for (int k = 0; k < leftover && k < order.length; k++) floors[order[k]]++;
+                for (int k = 0; k < unspecifiedIndices.size(); k++) {
+                    targetCounts[unspecifiedIndices.get(k)] = floors[k];
+                }
+            }
+
+            // Assign SRs round-robin to regions based on target counts
+            int srIdx = 0;
+            for (int i = 0; i < regionNames.size(); i++) {
+                String regionName = regionNames.get(i);
+                for (int j = 0; j < targetCounts[i] && srIdx < numSRs; j++) {
+                    regionToSRs.get(regionName).add(presentSRs.get(srIdx++));
+                }
+            }
+            // Any leftover SRs go to the largest region
+            while (srIdx < numSRs) {
+                String largest = regionNames.stream()
+                        .max(Comparator.comparingInt(r -> shipmentsByRegion.get(r).size()))
+                        .orElse(regionNames.get(0));
+                regionToSRs.get(largest).add(presentSRs.get(srIdx++));
+            }
+        }
+
+        log.info("AffinityMatch custom: SR→region assignment: {}", regionToSRs);
+
+        // Step 4: Assign shipments to SRs within each region (split evenly, cap 80)
+        Map<String, List<Shipment>> matched = new LinkedHashMap<>();
+        for (String sr : presentSRs) matched.put(sr, new ArrayList<>());
+
+        for (String regionName : regionNames) {
+            List<Shipment> regionShipments = shipmentsByRegion.get(regionName);
+            List<String> srsForRegion = regionToSRs.get(regionName);
+            if (srsForRegion.isEmpty() || regionShipments.isEmpty()) continue;
+
+            if (srsForRegion.size() == 1) {
+                String sr = srsForRegion.get(0);
+                List<Shipment> capped = regionShipments.size() > 80
+                        ? regionShipments.stream()
+                            .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed())
+                            .limit(80).collect(Collectors.toList())
+                        : regionShipments;
+                matched.get(sr).addAll(capped);
+                log.info("AffinityMatch custom: {} → {} shipments from region '{}' (cap 80)", sr, capped.size(), regionName);
+            } else {
+                // Multiple SRs in one region — split by angle from hub centroid
+                List<Shipment> sorted = regionShipments.stream()
+                        .sorted(Comparator.comparingDouble(s ->
+                                Math.atan2(s.getDropLongitude() - 73.8884305, s.getDropLatitude() - 18.4600561)))
+                        .collect(Collectors.toList());
+                int perSR = Math.min(80, sorted.size() / srsForRegion.size());
+                int idx = 0;
+                for (int i = 0; i < srsForRegion.size(); i++) {
+                    String sr = srsForRegion.get(i);
+                    int end = (i == srsForRegion.size() - 1)
+                            ? Math.min(idx + 80, sorted.size())
+                            : Math.min(idx + perSR, sorted.size());
+                    List<Shipment> slice = new ArrayList<>(sorted.subList(idx, end));
+                    matched.get(sr).addAll(slice);
+                    idx = end;
+                    log.info("AffinityMatch custom: {} → {} shipments from region '{}' (split, cap 80)", sr, slice.size(), regionName);
+                }
+            }
+        }
+
+        // Unassigned shipments stay unallocated
         long unassigned = allocated.stream()
-                .filter(s -> !assignedIds.contains(s.getShippingId()))
+                .filter(s -> matched.values().stream().noneMatch(list -> list.stream().anyMatch(sh -> sh.getShippingId().equals(s.getShippingId()))))
                 .count();
         if (unassigned > 0) {
             log.info("AffinityMatch custom: {} shipments outside all custom regions → unallocated", unassigned);
         }
 
-        // Step 3: Sequence routes
+        // Step 5: Sequence routes
         for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
             String sr = entry.getKey();
             List<Shipment> srShipments = entry.getValue();
@@ -435,21 +568,16 @@ public class AffinityMatchingController {
                 .flatMap(List::stream).collect(Collectors.toList());
         store.saveShipments(storeDateStr, toSave);
 
-        // Compute affinity scores (using custom region membership)
+        // Compute scores
         Map<String, Map<String, Object>> scores = new LinkedHashMap<>();
         for (Map.Entry<String, List<Shipment>> entry : matched.entrySet()) {
             String sr = entry.getKey();
             List<Shipment> srShipments = entry.getValue();
-            double[][] polygon = customRegions.get(sr);
-            int inRegion = polygon == null ? 0 : (int) srShipments.stream()
-                    .filter(s -> pointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
-                    .count();
             int total = srShipments.size();
-            double pct = total > 0 ? Math.round(inRegion * 1000.0 / total) / 10.0 : 0;
             Map<String, Object> sc = new LinkedHashMap<>();
-            sc.put("affinityShipments", inRegion);
+            sc.put("affinityShipments", total);
             sc.put("totalShipments", total);
-            sc.put("affinityPct", pct);
+            sc.put("affinityPct", 100.0);
             scores.put(sr, sc);
         }
 
@@ -458,8 +586,10 @@ public class AffinityMatchingController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("date", storeDateStr);
         result.put("mode", "affinity-custom");
-        result.put("customRegionSRs", customRegions.size());
+        result.put("customRegionSRs", numSRs);
         result.put("totalSRs", matched.size());
+        result.put("regionCount", customRegions.size());
+        result.put("regionToSRs", regionToSRs);
         result.put("unallocatedShipments", unassigned);
         result.put("allocationSummary", newSummary);
         result.put("affinityScores", scores);

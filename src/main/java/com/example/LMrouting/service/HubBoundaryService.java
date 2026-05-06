@@ -43,6 +43,13 @@ public class HubBoundaryService {
     // ── Layer context to match ────────────────────────────────────────────────
     private static final String TARGET_LAYER_CONTEXT = "Forward_Delivery";
 
+    /**
+     * DEMO FALLBACK — hardcoded facility ID for PNQ HDP.
+     * Used when the city-search API is unavailable (other team's service is down).
+     * Remove or replace once the dynamic lookup is stable.
+     */
+    private static final String DEMO_FALLBACK_FACILITY_ID = "694575c375b35f09017c4e61";
+
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
@@ -118,9 +125,10 @@ public class HubBoundaryService {
             JsonNode root = objectMapper.readTree(response.getBody());
             String token = root.path("access_token").asText(null);
             if (token == null || token.isBlank()) {
-                log.debug("HubBoundary: access_token missing in auth response");
+                log.warn("HubBoundary: access_token missing in auth response. Response keys: {}", root.fieldNames());
                 return null;
             }
+            log.info("HubBoundary: auth token obtained successfully (length={})", token.length());
             return "Bearer " + token;
 
         } catch (Exception e) {
@@ -183,36 +191,98 @@ public class HubBoundaryService {
     /**
      * Fetches both boundary and originalBoundary for the best-matching facility.
      *
-     * Strategy:
-     *   Attempt 1 — search directly by hub name (searchKey = "PNQ HDP", searchType = "facility")
-     *               This returns a narrow result set, making exact matching trivial.
-     *   Attempt 2 — fall back to city search (searchKey = "PUNE", searchType = "city")
-     *               and apply strict ALL-TOKEN matching so "PNQ/VSW" never beats "PNQ HDP".
+     * Correct 3-step flow (per API documentation):
+     *   Step A — city search (searchType="city", searchKey="PUNE")
+     *             → returns list of facilities with id + name (NO boundary coords yet)
+     *   Step B — pick the best-matching facility by hub name, extract its id
+     *   Step C — facility search (searchType="facility", searchKey=<facility_id>)
+     *             → returns the full facility record WITH boundary + originalBoundary coords
      *
-     * Logs all facility names returned so mismatches are visible in the Spring Boot console.
+     * DEMO FALLBACK: if the dynamic city search fails (other team's API is down),
+     * falls back to a hardcoded facility ID for PNQ HDP.
      */
     FacilityBoundaries fetchFacilityBoundaries(String bearerToken, String layerId, String city, String hubName) {
-        // ── Attempt 1: search by hub name directly ────────────────────────────
-        FacilityBoundaries direct = searchAndMatch(bearerToken, layerId, hubName, "facility", hubName);
-        if (direct != null) {
-            log.info("HubBoundary: found facility via direct hub-name search: '{}'", direct.facilityName());
-            return direct;
+        String url = String.format(SEARCH_URL_TEMPLATE, layerId);
+
+        // ── Step A: city search to get facility list ──────────────────────────
+        log.info("HubBoundary: Step A — city search for '{}' (hub='{}')", city, hubName);
+        JsonNode cityFacilities = searchRaw(bearerToken, url, city, "city");
+
+        if (cityFacilities != null && cityFacilities.isArray() && !cityFacilities.isEmpty()) {
+            // Log all names for diagnostics
+            List<String> allNames = new ArrayList<>();
+            for (JsonNode f : cityFacilities) {
+                allNames.add(f.path("name").asText("?") + " [id=" + f.path("id").asText("?") + "]");
+            }
+            log.info("HubBoundary: city search returned {} facilities: {}", allNames.size(), allNames);
+
+            // ── Step B: pick best matching facility ───────────────────────────
+            JsonNode best = pickBestFacility(cityFacilities, hubName);
+            if (best != null) {
+                String facilityId   = best.path("id").asText(null);
+                String facilityName = best.path("name").asText(hubName);
+                log.info("HubBoundary: matched facility '{}' (id='{}') for hub '{}'", facilityName, facilityId, hubName);
+
+                if (facilityId != null && !facilityId.isBlank()) {
+                    FacilityBoundaries result = fetchBoundaryByFacilityId(bearerToken, url, facilityId, facilityName);
+                    if (result != null) return result;
+                }
+            } else {
+                log.warn("HubBoundary: no acceptable match for hub '{}' in city='{}' results", hubName, city);
+            }
+        } else {
+            log.warn("HubBoundary: city search for '{}' returned no facilities", city);
         }
 
-        // ── Attempt 2: fall back to city search ───────────────────────────────
-        log.info("HubBoundary: direct search returned nothing, falling back to city search for '{}'", city);
-        return searchAndMatch(bearerToken, layerId, city, "city", hubName);
+        // ── DEMO FALLBACK: use hardcoded facility ID for PNQ HDP ─────────────
+        // Remove this block once the city-search API is stable.
+        log.warn("HubBoundary: dynamic lookup failed — using hardcoded demo fallback for hub '{}'", hubName);
+        return fetchBoundaryByFacilityId(bearerToken, url, DEMO_FALLBACK_FACILITY_ID, hubName + " (demo)");
     }
 
     /**
-     * Calls the search API with the given searchKey/searchType, then picks the best
-     * matching facility for hubName using strict ALL-TOKEN matching.
+     * Step C: fetch full facility record (with boundary coords) by facility ID.
      */
-    private FacilityBoundaries searchAndMatch(String bearerToken, String layerId,
-                                               String searchKey, String searchType, String hubName) {
-        try {
-            String url = String.format(SEARCH_URL_TEMPLATE, layerId);
+    private FacilityBoundaries fetchBoundaryByFacilityId(String bearerToken, String url,
+                                                          String facilityId, String facilityName) {
+        log.info("HubBoundary: facility search by id='{}'", facilityId);
+        JsonNode facilityFacilities = searchRaw(bearerToken, url, facilityId, "facility");
 
+        if (facilityFacilities == null || !facilityFacilities.isArray() || facilityFacilities.isEmpty()) {
+            log.warn("HubBoundary: facility search by id='{}' returned no results", facilityId);
+            return null;
+        }
+
+        JsonNode facilityNode = facilityFacilities.get(0);
+        // Use the name from the response if available
+        String resolvedName = facilityNode.path("name").asText(facilityName);
+
+        List<double[]> boundary         = extractRing(facilityNode.path("boundary"),         resolvedName, "boundary");
+        List<double[]> originalBoundary = extractRing(facilityNode.path("originalBoundary"), resolvedName, "originalBoundary");
+
+        if (boundary == null && originalBoundary == null) {
+            log.warn("HubBoundary: facility id='{}' has neither boundary nor originalBoundary", facilityId);
+            return null;
+        }
+        if (boundary == null) {
+            log.info("HubBoundary: primary boundary missing, promoting originalBoundary for '{}'", resolvedName);
+            boundary = originalBoundary;
+            originalBoundary = null;
+        }
+
+        log.info("HubBoundary: successfully extracted boundary ({} pts) for '{}'", boundary.size(), resolvedName);
+        return new FacilityBoundaries(resolvedName, boundary, originalBoundary);
+    }
+
+    /**
+     * Calls the search API and returns the facilities array, or null on failure.
+     * Handles both response shapes:
+     *   { "data": { "facilities": [...] } }
+     *   { "facilities": [...] }
+     *   [ ... ]  (direct array)
+     */
+    private JsonNode searchRaw(String bearerToken, String url, String searchKey, String searchType) {
+        try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Authorization", bearerToken);
@@ -227,51 +297,54 @@ public class HubBoundaryService {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
 
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-                log.debug("HubBoundary: search ({}) returned status {}", searchKey, response.getStatusCode());
+                log.warn("HubBoundary: search ({}/{}) returned HTTP status {}", searchType, searchKey, response.getStatusCode());
                 return null;
             }
 
-            JsonNode root = objectMapper.readTree(response.getBody());
-            JsonNode facilities = root.path("data").path("facilities");
-            if (!facilities.isArray()) facilities = root.path("facilities");
-            if (!facilities.isArray() || facilities.isEmpty()) {
-                log.debug("HubBoundary: no facilities for searchKey='{}'", searchKey);
-                return null;
+            String rawBody = response.getBody();
+            // Always log the full raw response for debugging
+            log.info("HubBoundary: raw response for searchType='{}' searchKey='{}' ({}chars): {}",
+                    searchType, searchKey, rawBody.length(),
+                    rawBody.length() > 1000 ? rawBody.substring(0, 1000) + "...[truncated]" : rawBody);
+
+            JsonNode root = objectMapper.readTree(rawBody);
+
+            // Try all known response shapes in order
+            if (root.isArray() && !root.isEmpty()) return root;
+
+            // { "data": { "facilities": [...] } }
+            JsonNode nested = root.path("data").path("facilities");
+            if (nested.isArray() && !nested.isEmpty()) return nested;
+
+            // { "facilities": [...] }
+            nested = root.path("facilities");
+            if (nested.isArray() && !nested.isEmpty()) return nested;
+
+            // { "data": [...] }
+            nested = root.path("data");
+            if (nested.isArray() && !nested.isEmpty()) return nested;
+
+            // Single object wrapped in data (facility search by ID may return single object)
+            // { "data": { "id": "...", "boundary": {...} } }
+            JsonNode dataNode = root.path("data");
+            if (dataNode.isObject() && dataNode.has("id")) {
+                // Wrap in array so callers can use .get(0)
+                log.info("HubBoundary: wrapping single facility object in array for searchKey='{}'", searchKey);
+                return objectMapper.createArrayNode().add(dataNode);
             }
 
-            // Log all names for diagnostics
-            List<String> allNames = new ArrayList<>();
-            for (JsonNode f : facilities) {
-                allNames.add(f.path("name").asText("?") + " [id=" + f.path("id").asText("?") + "]");
-            }
-            log.info("HubBoundary: searchKey='{}' returned {} facilities: {}", searchKey, allNames.size(), allNames);
-
-            JsonNode best = pickBestFacility(facilities, hubName);
-            if (best == null) {
-                log.warn("HubBoundary: no acceptable match for hub '{}' in results for searchKey='{}'", hubName, searchKey);
-                return null;
+            // { "id": "...", "boundary": {...} } — root is the facility itself
+            if (root.isObject() && root.has("id")) {
+                log.info("HubBoundary: root is single facility object for searchKey='{}'", searchKey);
+                return objectMapper.createArrayNode().add(root);
             }
 
-            String facilityName = best.path("name").asText(hubName);
-            log.info("HubBoundary: matched facility '{}' for hub '{}'", facilityName, hubName);
-
-            List<double[]> boundary         = extractRing(best.path("boundary"),         facilityName, "boundary");
-            List<double[]> originalBoundary = extractRing(best.path("originalBoundary"), facilityName, "originalBoundary");
-
-            if (boundary == null && originalBoundary == null) {
-                log.warn("HubBoundary: facility '{}' has neither boundary nor originalBoundary", facilityName);
-                return null;
-            }
-            if (boundary == null) {
-                log.info("HubBoundary: primary boundary missing for '{}', promoting originalBoundary", facilityName);
-                boundary = originalBoundary;
-                originalBoundary = null;
-            }
-
-            return new FacilityBoundaries(facilityName, boundary, originalBoundary);
+            log.warn("HubBoundary: could not find facilities in response for searchType='{}' searchKey='{}'. Root keys: {}",
+                    searchType, searchKey, root.fieldNames());
+            return null;
 
         } catch (Exception e) {
-            log.debug("HubBoundary: search call failed for searchKey='{}': {}", searchKey, e.getMessage());
+            log.warn("HubBoundary: search call failed for searchType='{}' searchKey='{}': {}", searchType, searchKey, e.getMessage());
             return null;
         }
     }

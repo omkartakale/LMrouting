@@ -9,6 +9,8 @@
   <!-- Leaflet-PM: polygon drawing plugin -->
   <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.css"/>
   <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.min.js"></script>
+  <!-- Google Maps Marker Clusterer for performance -->
+  <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
   <script>
     // Google Maps API key — loaded from /api/config at runtime
     var GMAP_API_KEY = '';
@@ -17,7 +19,7 @@
       GMAP_API_KEY = key;
       var s = document.createElement('script');
       s.id = 'gmap-script';
-      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + key + '&callback=onGoogleMapsReady';
+      s.src = 'https://maps.googleapis.com/maps/api/js?key=' + key + '&libraries=drawing&callback=onGoogleMapsReady';
       s.async = true; s.defer = true;
       document.head.appendChild(s);
     }
@@ -298,11 +300,22 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
       <!-- Draw Region mode -->
       <div id="affinity-draw-mode" style="display:none">
-        <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">
-          Draw a <strong>custom polygon</strong> on the map for each SR. The polygon must stay within the hub boundary.
+        <div style="font-size:.74rem;color:#6c757d;margin-bottom:8px">
+          Define how many affinity regions to draw, then draw each one on the map. SRs are assigned to regions automatically based on shipment density.
+        </div>
+        <!-- Region count input -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <label style="font-size:.76rem;font-weight:600;color:#343a40;white-space:nowrap">Regions to draw:</label>
+          <input type="number" id="region-count-input" min="1" max="20" value="3"
+                 style="width:60px;padding:4px 6px;border:1px solid #ced4da;border-radius:4px;font-size:.8rem;font-weight:600"
+                 onchange="onRegionCountChange()"/>
+          <button onclick="applyRegionCount()"
+                  style="padding:4px 10px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#1976d2;color:#fff">
+            Set
+          </button>
         </div>
         <div id="affinity-draw-list" style="max-height:220px;overflow-y:auto;margin-bottom:8px">
-          <div class="empty-text">Select a date and load attendance first</div>
+          <div class="empty-text">Set region count above to start drawing</div>
         </div>
         <div id="affinity-draw-status" style="font-size:.72rem;color:#6c757d;margin-bottom:6px;min-height:18px"></div>
       </div>
@@ -481,6 +494,9 @@ var gmap = null;           // google.maps.Map instance
 var gmapMarkers = [];      // google.maps.Marker[]
 var gmapPolylines = [];    // google.maps.Polyline[]
 var gmapHubMarker = null;
+var gmapDrawingManager = null;  // google.maps.drawing.DrawingManager
+var gmapMarkerClusterer = null; // MarkerClusterer for performance
+var gmapCustomRegionPolygons = {}; // regionName → google.maps.Polygon (drawn regions on gmap)
 var activeMapProvider = 'leaflet'; // 'leaflet' or 'google'
 
 function esc(s) {
@@ -548,7 +564,26 @@ function toggleMapProvider() {
     document.getElementById('map').style.display = 'block';
     btn.textContent = '🗺 Google';
     btn.title = 'Switch to Google Maps';
-    setTimeout(function() { map.invalidateSize(); }, 100);
+    setTimeout(function() {
+      map.invalidateSize();
+      // Re-add hub boundary layers if they exist but aren't on the map
+      if (hubBoundaryLayer && !map.hasLayer(hubBoundaryLayer)) {
+        hubBoundaryLayer.addTo(map);
+      }
+      if (hubOriginalBoundaryLayer && !map.hasLayer(hubOriginalBoundaryLayer)) {
+        hubOriginalBoundaryLayer.addTo(map);
+      }
+      // If boundary was never fetched, fetch it now
+      if (!hubBoundaryLayer && lastHubName) {
+        fetchHubBoundary(lastHubName);
+      }
+      // Re-add any drawn affinity region polygons to Leaflet
+      Object.keys(customRegionLayers).forEach(function(r) {
+        if (customRegionLayers[r] && !map.hasLayer(customRegionLayers[r])) {
+          customRegionLayers[r].addTo(map);
+        }
+      });
+    }, 100);
   }
 }
 
@@ -566,8 +601,12 @@ function initGoogleMap() {
     mapTypeControl: true,
     mapTypeControlOptions: { position: google.maps.ControlPosition.TOP_RIGHT },
     streetViewControl: false,
-    fullscreenControl: false
+    fullscreenControl: false,
+    // Performance: disable unnecessary features
+    gestureHandling: 'greedy',
+    clickableIcons: false
   });
+
   // Hub marker
   gmapHubMarker = new google.maps.Marker({
     position: { lat: HUB_LAT, lng: HUB_LNG },
@@ -585,85 +624,228 @@ function initGoogleMap() {
   });
   var infoWindow = new google.maps.InfoWindow({ content: '<b>Hub</b>' });
   gmapHubMarker.addListener('click', function() { infoWindow.open(gmap, gmapHubMarker); });
+
+  // Initialize Drawing Manager for affinity region drawing on Google Maps
+  if (google.maps.drawing) {
+    gmapDrawingManager = new google.maps.drawing.DrawingManager({
+      drawingMode: null, // start in non-drawing mode
+      drawingControl: false, // we control it programmatically
+      polygonOptions: {
+        strokeWeight: 2.5,
+        fillOpacity: 0.15,
+        editable: false,
+        zIndex: 10
+      }
+    });
+    gmapDrawingManager.setMap(gmap);
+
+    // Listen for polygon completion
+    google.maps.event.addListener(gmapDrawingManager, 'polygoncomplete', function(polygon) {
+      gmapDrawingManager.setDrawingMode(null);
+      if (!activeDrawRegion) { polygon.setMap(null); return; }
+
+      var regionName = activeDrawRegion;
+      var colorIndex = parseInt(regionName.replace('Region ', ''), 10) - 1;
+      var color = REGION_COLORS[colorIndex % REGION_COLORS.length];
+
+      // Extract coordinates
+      var path = polygon.getPath();
+      var latlngs = [];
+      for (var i = 0; i < path.getLength(); i++) {
+        var pt = path.getAt(i);
+        latlngs.push({ lat: pt.lat(), lng: pt.lng() });
+      }
+
+      // Validate
+      var validation = validateCustomRegionGmap(latlngs);
+      if (!validation.valid) {
+        polygon.setMap(null);
+        setDrawStatus('❌ ' + validation.reason + ' — please try again');
+        activeDrawRegion = null;
+        drawingActive = false;
+        renderDrawList();
+        return;
+      }
+
+      // Remove old gmap polygon for this region
+      if (gmapCustomRegionPolygons[regionName]) {
+        gmapCustomRegionPolygons[regionName].setMap(null);
+      }
+
+      // Style the polygon
+      polygon.setOptions({
+        strokeColor: color,
+        fillColor: color,
+        strokeOpacity: 0.9,
+        fillOpacity: 0.15
+      });
+      gmapCustomRegionPolygons[regionName] = polygon;
+
+      // Convert to [lat,lng] array and simplify
+      var rawCoords = latlngs.map(function(ll) { return [ll.lat, ll.lng]; });
+      var coords = simplifyPolygon(rawCoords, 0.00008);
+      if (coords.length < 3) coords = rawCoords;
+      customRegionMap[regionName] = { latlngs: coords, color: color };
+
+      // Also add to Leaflet map (hidden if not active)
+      if (customRegionLayers[regionName]) map.removeLayer(customRegionLayers[regionName]);
+      var permLayer = L.polygon(coords, {
+        color: color, weight: 2.5, opacity: 0.9,
+        fillColor: color, fillOpacity: 0.15, dashArray: null
+      });
+      if (activeMapProvider === 'leaflet') permLayer.addTo(map);
+      permLayer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(regionName) + '</span>', { sticky: true });
+      customRegionLayers[regionName] = permLayer;
+
+      activeDrawRegion = null;
+      drawingActive = false;
+      setDrawStatus('✅ <strong>' + esc(regionName) + '</strong> saved (' + coords.length + ' points, simplified from ' + rawCoords.length + ')');
+      renderDrawList();
+    });
+  }
 }
 
 function syncToGoogleMap() {
   if (!gmap) return;
-  // Clear existing Google markers and polylines
+
+  // ── Clear existing overlays ───────────────────────────────────────────────
+  // Destroy clusterer first
+  if (gmapMarkerClusterer) {
+    gmapMarkerClusterer.clearMarkers();
+    gmapMarkerClusterer = null;
+  }
   gmapMarkers.forEach(function(m) { m.setMap(null); });
   gmapPolylines.forEach(function(p) { p.setMap(null); });
   gmapMarkers = [];
   gmapPolylines = [];
 
-  // Re-add all SR markers and polylines from srLayers
+  // ── Hub boundary ──────────────────────────────────────────────────────────
+  if (hubBoundaryLayer) {
+    try {
+      var hubCoords = hubBoundaryLayer.getLatLngs()[0];
+      if (hubCoords && hubCoords.length) {
+        var hubPath = hubCoords.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
+        var hubPoly = new google.maps.Polygon({
+          paths: hubPath,
+          strokeColor: '#b71c1c',
+          strokeOpacity: 1.0,
+          strokeWeight: 4,
+          fillColor: '#e53935',
+          fillOpacity: 0.04,
+          map: gmap,
+          zIndex: 1,
+          clickable: false
+        });
+        gmapPolylines.push(hubPoly);
+      }
+    } catch(e) { /* ignore */ }
+  }
+
+  // ── Drawn affinity regions ────────────────────────────────────────────────
+  // Show any regions already drawn (e.g. drawn on Leaflet, now switching to Google)
+  Object.keys(customRegionMap).forEach(function(regionName) {
+    var region = customRegionMap[regionName];
+    if (!region || !region.latlngs || region.latlngs.length < 3) return;
+    if (gmapCustomRegionPolygons[regionName]) return; // already on gmap
+    var path = region.latlngs.map(function(c) { return { lat: c[0], lng: c[1] }; });
+    var poly = new google.maps.Polygon({
+      paths: path,
+      strokeColor: region.color,
+      strokeOpacity: 0.9,
+      strokeWeight: 2.5,
+      fillColor: region.color,
+      fillOpacity: 0.15,
+      map: gmap,
+      zIndex: 5,
+      clickable: false
+    });
+    gmapCustomRegionPolygons[regionName] = poly;
+  });
+
+  // ── SR polylines (routes) — drawn first, low z-index ─────────────────────
   Object.keys(srLayers).forEach(function(srName) {
     var layer = srLayers[srName];
     var color = layer.color || '#1976d2';
 
-    // Add markers
-    if (layer.markers) {
-      layer.markers.forEach(function(leafletMarker) {
-        var ll = leafletMarker.getLatLng();
-        var gMarker = new google.maps.Marker({
-          position: { lat: ll.lat, lng: ll.lng },
-          map: gmap,
-          title: leafletMarker.options.title || srName,
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 6,
-            fillColor: color,
-            fillOpacity: 1,
-            strokeColor: '#fff',
-            strokeWeight: 2
-          }
-        });
-        // Copy popup content
-        var popupContent = leafletMarker.getPopup() ? leafletMarker.getPopup().getContent() : '';
-        if (popupContent) {
-          var infoWindow = new google.maps.InfoWindow({ content: popupContent, maxWidth: 250 });
-          gMarker.addListener('click', function() { infoWindow.open(gmap, gMarker); });
-        }
-        gmapMarkers.push(gMarker);
-      });
-    }
-
-    // Add OSM polyline
     if (layer.osmPolyline) {
       var latlngs = layer.osmPolyline.getLatLngs();
       var path = latlngs.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
-      var gPoly = new google.maps.Polyline({
-        path: path,
-        geodesic: true,
-        strokeColor: color,
-        strokeOpacity: 0.8,
-        strokeWeight: 3,
-        map: gmap
-      });
-      gmapPolylines.push(gPoly);
+      gmapPolylines.push(new google.maps.Polyline({
+        path: path, geodesic: true,
+        strokeColor: color, strokeOpacity: 0.8, strokeWeight: 3,
+        map: gmap, zIndex: 2
+      }));
     }
-
-    // Add Google polyline (dashed)
     if (layer.googlePolyline) {
       var latlngs2 = layer.googlePolyline.getLatLngs();
       var path2 = latlngs2.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
-      var gPoly2 = new google.maps.Polyline({
-        path: path2,
-        geodesic: true,
-        strokeColor: '#1b8a3c',
-        strokeOpacity: 0.85,
-        strokeWeight: 4,
+      gmapPolylines.push(new google.maps.Polyline({
+        path: path2, geodesic: true,
+        strokeColor: '#1b8a3c', strokeOpacity: 0.85, strokeWeight: 4,
         icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }],
-        map: gmap
-      });
-      gmapPolylines.push(gPoly2);
+        map: gmap, zIndex: 2
+      }));
     }
   });
 
-  // Fit bounds
+  // ── SR markers — batch-create then cluster for performance ────────────────
+  // Build all marker objects WITHOUT setting map (faster than setting map one by one)
+  var allMarkers = [];
+  Object.keys(srLayers).forEach(function(srName) {
+    var layer = srLayers[srName];
+    var color = layer.color || '#1976d2';
+    if (!layer.markers) return;
+
+    layer.markers.forEach(function(leafletMarker) {
+      var ll = leafletMarker.getLatLng();
+      var gMarker = new google.maps.Marker({
+        position: { lat: ll.lat, lng: ll.lng },
+        title: leafletMarker.options.title || srName,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 6,
+          fillColor: color,
+          fillOpacity: 1,
+          strokeColor: '#fff',
+          strokeWeight: 2
+        },
+        optimized: true  // key performance flag — uses canvas rendering
+      });
+      var popupContent = leafletMarker.getPopup() ? leafletMarker.getPopup().getContent() : '';
+      if (popupContent) {
+        (function(m, content) {
+          var iw = new google.maps.InfoWindow({ content: content, maxWidth: 250 });
+          m.addListener('click', function() { iw.open(gmap, m); });
+        })(gMarker, popupContent);
+      }
+      allMarkers.push(gMarker);
+      gmapMarkers.push(gMarker);
+    });
+  });
+
+  // Use MarkerClusterer if available (groups nearby markers at low zoom = much faster)
+  if (allMarkers.length > 0) {
+    if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
+      gmapMarkerClusterer = new window.markerClusterer.MarkerClusterer({
+        map: gmap,
+        markers: allMarkers,
+        algorithm: new window.markerClusterer.SuperClusterAlgorithm({ maxZoom: 15, radius: 60 })
+      });
+    } else {
+      // Fallback: add markers directly but in a single batch using requestAnimationFrame
+      allMarkers.forEach(function(m) { m.setMap(gmap); });
+    }
+  }
+
+  // ── Fit bounds ────────────────────────────────────────────────────────────
   if (gmapMarkers.length > 0) {
     var bounds = new google.maps.LatLngBounds();
     bounds.extend({ lat: HUB_LAT, lng: HUB_LNG });
-    gmapMarkers.forEach(function(m) { bounds.extend(m.getPosition()); });
+    // Sample up to 200 markers for bounds calculation (no need to iterate all 4000+)
+    var step = Math.max(1, Math.floor(gmapMarkers.length / 200));
+    for (var i = 0; i < gmapMarkers.length; i += step) {
+      bounds.extend(gmapMarkers[i].getPosition());
+    }
     gmap.fitBounds(bounds, 40);
   }
 }
@@ -673,6 +855,10 @@ function initMap() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
+
+  // Create the boundary pane immediately so it's always available
+  // before any boundary drawing calls happen
+  ensureBoundaryPane();
 
   hubMarker = L.marker([HUB_LAT, HUB_LNG], {
     icon: L.divIcon({
@@ -693,9 +879,15 @@ function loadConfig() {
       HUB_LAT = hub.hubLat;
       HUB_LNG = hub.hubLng;
       lastHubName = hub.hubName || null;
+      // Clear boundary cache if hub changed
+      if (cachedBoundaryData && cachedBoundaryData.hubName !== lastHubName) {
+        cachedBoundaryData = null;
+      }
       document.getElementById('hub-info').textContent = hub.hubName + ' (' + hub.hubLat.toFixed(4) + ', ' + hub.hubLng.toFixed(4) + ')';
       map.setView([HUB_LAT, HUB_LNG], 13);
       hubMarker.setLatLng([HUB_LAT, HUB_LNG]);
+      // Eagerly fetch hub boundary as soon as we know the hub name
+      if (lastHubName) fetchHubBoundary(lastHubName);
     })
     .catch(function() {});
 
@@ -805,24 +997,83 @@ function togglePincodeBoundaries() {
  * Fire-and-forget: fetch hub boundary from backend proxy and draw on map.
  * Silently does nothing if the fetch fails or returns no data.
  */
+// Cached boundary data — stored after first successful fetch so re-uploads don't need a new API call
+var cachedBoundaryData = null;
+
 function fetchHubBoundary(hubName) {
   if (!hubName) return;
-  // Skip re-fetch if same hub boundary is already displayed
-  if (hubBoundaryLayer && lastHubName === hubName) return;
   lastHubName = hubName;
+
+  // If we already have cached boundary data for this hub, redraw immediately
+  if (cachedBoundaryData && cachedBoundaryData.hubName === hubName) {
+    console.log('Hub boundary: redrawing from cache for', hubName);
+    drawHubBoundary(
+      cachedBoundaryData.coordinates,
+      cachedBoundaryData.originalBoundary || null,
+      cachedBoundaryData.hubName,
+      cachedBoundaryData.facilityName || hubName
+    );
+    return;
+  }
+
+  console.log('Hub boundary: fetching from API for', hubName);
 
   fetch('/api/hub/boundary?hubName=' + encodeURIComponent(hubName))
     .then(function(r) {
-      if (r.status === 204 || !r.ok) return null;
+      if (r.status === 204 || !r.ok) {
+        console.warn('Hub boundary: API returned', r.status, 'for hub', hubName);
+        showBoundaryWarning(hubName);
+        return null;
+      }
       return r.json();
     })
     .then(function(data) {
-      if (!data || !data.coordinates || !data.coordinates.length) return;
-      drawHubBoundary(data.coordinates, data.originalBoundary, data.hubName || hubName, data.facilityName || hubName);
+      if (!data) return;
+      if (!data.coordinates || !data.coordinates.length) {
+        console.warn('Hub boundary: empty coordinates for hub', hubName);
+        showBoundaryWarning(hubName);
+        return;
+      }
+      console.log('Hub boundary: drawing', data.coordinates.length, 'points for', hubName);
+      // Cache for subsequent re-uploads
+      cachedBoundaryData = data;
+      drawHubBoundary(
+        data.coordinates,
+        data.originalBoundary || null,
+        data.hubName || hubName,
+        data.facilityName || hubName
+      );
     })
-    .catch(function() {
-      // Silent failure — boundary is optional, never block the user
+    .catch(function(err) {
+      console.warn('Hub boundary fetch failed:', err);
+      showBoundaryWarning(hubName);
     });
+}
+
+function showBoundaryWarning(hubName) {
+  // Show a non-blocking info message with a retry button
+  var existing = document.getElementById('boundary-warn');
+  if (existing) return; // already showing
+  var el = document.createElement('div');
+  el.id = 'boundary-warn';
+  el.style.cssText = 'position:absolute;bottom:50px;left:50%;transform:translateX(-50%);z-index:10002;' +
+    'background:rgba(255,248,225,.97);border:1px solid #ffe082;border-radius:6px;padding:7px 12px;' +
+    'font-size:.75rem;color:#e65100;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15);' +
+    'display:flex;align-items:center;gap:8px;white-space:nowrap';
+  el.innerHTML = '⚠️ Hub boundary unavailable for <em>' + esc(hubName) + '</em>' +
+    ' &nbsp;<button onclick="retryBoundary()" style="padding:2px 8px;font-size:.72rem;border:1px solid #e65100;' +
+    'border-radius:4px;background:#fff;color:#e65100;cursor:pointer;font-weight:600">Retry</button>' +
+    ' <button onclick="document.getElementById(\'boundary-warn\').remove()" ' +
+    'style="padding:2px 6px;font-size:.72rem;border:none;background:none;color:#999;cursor:pointer">✕</button>';
+  document.getElementById('map-container').appendChild(el);
+  // Auto-dismiss after 10 seconds
+  setTimeout(function() { if (el.parentNode) el.remove(); }, 10000);
+}
+
+function retryBoundary() {
+  var el = document.getElementById('boundary-warn');
+  if (el) el.remove();
+  if (lastHubName) fetchHubBoundary(lastHubName);
 }
 
 /**
@@ -904,6 +1155,11 @@ function drawHubBoundary(coords, originalCoords, hubName, facilityName) {
 
   // ── Update legend ───────────────────────────────────────────────────────
   updateBoundaryLegend(hubName, facilityName, true);
+
+  // Fit map to show the full hub boundary
+  if (hubBoundaryLayer) {
+    try { map.fitBounds(hubBoundaryLayer.getBounds().pad(0.05)); } catch(e) {}
+  }
 }
 
 /**
@@ -1054,10 +1310,12 @@ function renderUploadResult(data) {
   populateDateSelector(data.datesFound || []);
   if (data.primaryDate) selectDate(data.primaryDate);
 
-  // Fire-and-forget: fetch hub boundary asynchronously after CSV upload
-  // Uses hub name already loaded from /api/hub during map init
-  if (lastHubName) {
-    fetchHubBoundary(lastHubName);
+  // Fetch hub boundary after upload — use hub name from upload response if available,
+  // otherwise fall back to the hub name loaded at startup
+  var hubNameForBoundary = data.hubName || lastHubName;
+  if (hubNameForBoundary) {
+    lastHubName = hubNameForBoundary;
+    fetchHubBoundary(hubNameForBoundary);
   }
 }
 
@@ -1713,16 +1971,21 @@ function toggleShipmentDisplay() {
 }
 
 // ── CUSTOM AFFINITY REGION DRAWING ───────────────────────────────────────────
-// Stores drawn polygons per SR: { srName: { layer: L.polygon, latlngs: [[lat,lng]...] } }
+// Stores drawn polygons per region: { "Region 1": { latlngs: [[lat,lng]...], color: '#...' } }
 var customRegionMap = {};
-var affinityMode = 'pincode'; // 'pincode' | 'draw'
-var activeDrawSr = null;      // SR currently being drawn for
-var customRegionLayers = {};  // srName → L.polygon on map (for display)
+var customRegionLayers = {};    // { "Region 1": L.polygon }
+var affinityMode = 'pincode';   // 'pincode' | 'draw'
+var activeDrawRegion = null;    // region name currently being drawn
 var drawingActive = false;
+var plannedRegionCount = 0;     // how many regions the user wants to draw
+var regionSrCounts = {};        // { "Region 1": 2, "Region 2": 3 } — user-specified SR count per region
 
-/**
- * Switch between pincode-based and draw-based affinity modes.
- */
+// Distinct colors for numbered regions
+var REGION_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa',
+                     '#00acc1','#f4511e','#3949ab','#7cb342','#c0ca33',
+                     '#6d4c41','#546e7a','#d81b60','#039be5','#00897b',
+                     '#ffb300','#5e35b1','#1565c0','#2e7d32','#ef6c00'];
+
 function setAffinityMode(mode) {
   affinityMode = mode;
   var pincodeBtn = document.getElementById('affinity-mode-pincode-btn');
@@ -1735,7 +1998,7 @@ function setAffinityMode(mode) {
     drawBtn.style.background = '#e9ecef';    drawBtn.style.color = '#495057';
     pincodeDiv.style.display = 'block';
     drawDiv.style.display = 'none';
-    stopDrawing(); // cancel any active drawing
+    stopDrawing();
   } else {
     drawBtn.style.background = '#8e24aa'; drawBtn.style.color = '#fff';
     pincodeBtn.style.background = '#e9ecef'; pincodeBtn.style.color = '#495057';
@@ -1746,107 +2009,221 @@ function setAffinityMode(mode) {
   updateAffinityBadge();
 }
 
-/**
- * Render the per-SR draw buttons in draw mode.
- */
+function onRegionCountChange() { /* live validation only */ }
+
+function applyRegionCount() {
+  var input = document.getElementById('region-count-input');
+  var n = parseInt(input.value, 10);
+  if (isNaN(n) || n < 1) { n = 1; input.value = 1; }
+  if (n > 20) { n = 20; input.value = 20; }
+  plannedRegionCount = n;
+
+  // Clear any existing drawn regions when count changes
+  stopDrawing();
+  Object.keys(customRegionLayers).forEach(function(r) {
+    if (customRegionLayers[r]) map.removeLayer(customRegionLayers[r]);
+  });
+  Object.keys(gmapCustomRegionPolygons).forEach(function(r) {
+    if (gmapCustomRegionPolygons[r]) gmapCustomRegionPolygons[r].setMap(null);
+  });
+  customRegionMap = {};
+  customRegionLayers = {};
+  gmapCustomRegionPolygons = {};
+  regionSrCounts = {};
+  setDrawStatus('');
+  renderDrawList();
+  updateAffinityBadge();
+}
+
 function renderDrawList() {
   var container = document.getElementById('affinity-draw-list');
-  if (!presentSrNames || !presentSrNames.length) {
-    container.innerHTML = '<div class="empty-text">Mark SRs present first</div>';
+  if (plannedRegionCount === 0) {
+    container.innerHTML = '<div class="empty-text">Set region count above to start drawing</div>';
     return;
   }
+
+  var totalAssigned = Object.values(regionSrCounts).reduce(function(s, v) { return s + (v || 0); }, 0);
+  var presentCount = presentSrNames ? presentSrNames.length : 0;
+
   var h = '';
-  presentSrNames.forEach(function(sr, i) {
-    var color = SR_COLORS[i % SR_COLORS.length];
-    var hasRegion = customRegionMap[sr] && customRegionMap[sr].latlngs && customRegionMap[sr].latlngs.length >= 3;
-    var isActive  = activeDrawSr === sr;
-    h += '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
+  // Header row showing total SR assignment status
+  if (presentCount > 0) {
+    var remaining = presentCount - totalAssigned;
+    var statusColor = remaining === 0 ? '#2e7d32' : (remaining < 0 ? '#c62828' : '#e65100');
+    h += '<div style="font-size:.72rem;color:' + statusColor + ';font-weight:600;margin-bottom:6px;padding:4px 6px;background:#f8f9fa;border-radius:4px">';
+    h += 'SRs assigned: ' + totalAssigned + ' / ' + presentCount;
+    if (remaining > 0) h += ' (' + remaining + ' unassigned)';
+    else if (remaining < 0) h += ' ⚠️ over-assigned by ' + Math.abs(remaining);
+    else h += ' ✅ all assigned';
+    h += '</div>';
+  }
+
+  for (var i = 1; i <= plannedRegionCount; i++) {
+    var regionName = 'Region ' + i;
+    var color = REGION_COLORS[(i - 1) % REGION_COLORS.length];
+    var hasRegion = customRegionMap[regionName] && customRegionMap[regionName].latlngs && customRegionMap[regionName].latlngs.length >= 3;
+    var isActive  = activeDrawRegion === regionName;
+    var srCount   = regionSrCounts[regionName] || '';
+
+    h += '<div style="display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
     h += '<div style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>';
-    h += '<div style="min-width:52px;font-weight:600;color:#212529">' + esc(sr) + '</div>';
+    h += '<div style="min-width:52px;font-weight:600;color:#212529">' + esc(regionName) + '</div>';
+
     if (isActive) {
       h += '<button onclick="stopDrawing()" style="flex:1;padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#e53935;color:#fff">⏹ Stop</button>';
     } else {
-      h += '<button onclick="startDrawingFor(\'' + esc(sr) + '\',' + i + ')" style="flex:1;padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:' + (hasRegion ? '#43a047' : '#1976d2') + ';color:#fff">' + (hasRegion ? '✏️ Redraw' : '✏️ Draw') + '</button>';
+      h += '<button onclick="startDrawingFor(\'' + esc(regionName) + '\',' + (i-1) + ')" style="padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:' + (hasRegion ? '#43a047' : '#1976d2') + ';color:#fff">' + (hasRegion ? '✏️ Redraw' : '✏️ Draw') + '</button>';
     }
+
+    // SR count input — only shown when region is drawn
     if (hasRegion && !isActive) {
-      h += '<button onclick="clearCustomRegion(\'' + esc(sr) + '\')" title="Remove region" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#ffebee;color:#c62828">✕</button>';
+      h += '<input type="number" min="1" max="' + presentCount + '" value="' + esc(String(srCount)) + '" placeholder="SRs"'
+        + ' data-region="' + esc(regionName) + '"'
+        + ' onchange="updateRegionSrCount(this)"'
+        + ' style="width:46px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;text-align:center"'
+        + ' title="Number of SRs to assign to ' + esc(regionName) + '"/>';
+      h += '<span style="font-size:.65rem;color:#6c757d">SRs</span>';
+      h += '<button onclick="clearCustomRegion(\'' + esc(regionName) + '\')" title="Remove region" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#ffebee;color:#c62828">✕</button>';
+    } else if (!isActive) {
+      // Region not drawn yet — placeholder to keep layout consistent
+      h += '<span style="flex:1;font-size:.68rem;color:#adb5bd;font-style:italic">draw first</span>';
     }
+
     h += '</div>';
-  });
+  }
   container.innerHTML = h;
   updateAffinityBadge();
+}
+
+function updateRegionSrCount(input) {
+  var regionName = input.getAttribute('data-region');
+  var val = parseInt(input.value, 10);
+  if (isNaN(val) || val < 1) { val = 1; input.value = 1; }
+  regionSrCounts[regionName] = val;
+  // Re-render just the header status without full re-render (avoids losing focus)
+  renderDrawList();
+}
+
+/**
+ * Douglas-Peucker polyline simplification.
+ * Reduces the number of points in a freehand polygon while preserving shape.
+ * tolerance is in degrees (0.00008 ≈ 8 metres at Indian latitudes).
+ */
+function simplifyPolygon(points, tolerance) {
+  if (points.length <= 4) return points;
+  return dpSimplify(points, tolerance);
+}
+
+function dpSimplify(pts, tol) {
+  if (pts.length <= 2) return pts;
+  var maxDist = 0, maxIdx = 0;
+  var start = pts[0], end = pts[pts.length - 1];
+  for (var i = 1; i < pts.length - 1; i++) {
+    var d = perpendicularDist(pts[i], start, end);
+    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  }
+  if (maxDist > tol) {
+    var left  = dpSimplify(pts.slice(0, maxIdx + 1), tol);
+    var right = dpSimplify(pts.slice(maxIdx), tol);
+    return left.slice(0, left.length - 1).concat(right);
+  }
+  return [start, end];
+}
+
+function perpendicularDist(pt, lineStart, lineEnd) {
+  var dx = lineEnd[0] - lineStart[0];
+  var dy = lineEnd[1] - lineStart[1];
+  if (dx === 0 && dy === 0) {
+    return Math.sqrt(Math.pow(pt[0] - lineStart[0], 2) + Math.pow(pt[1] - lineStart[1], 2));
+  }
+  var t = ((pt[0] - lineStart[0]) * dx + (pt[1] - lineStart[1]) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  return Math.sqrt(Math.pow(pt[0] - (lineStart[0] + t * dx), 2) + Math.pow(pt[1] - (lineStart[1] + t * dy), 2));
 }
 
 /**
  * Start drawing a polygon for the given SR.
  * Uses Leaflet-PM freehand/polygon drawing.
  */
-function startDrawingFor(srName, srIndex) {
-  if (!map.pm) {
-    showAllocError('Drawing plugin not loaded. Please refresh the page.');
+function startDrawingFor(regionName, colorIndex) {
+  stopDrawing();
+  activeDrawRegion = regionName;
+  drawingActive = true;
+  var color = REGION_COLORS[colorIndex % REGION_COLORS.length];
+
+  // ── Google Maps drawing ───────────────────────────────────────────────────
+  if (activeMapProvider === 'google') {
+    if (!gmapDrawingManager) {
+      showAllocError('Google Maps drawing not available. Please wait for the map to fully load.');
+      activeDrawRegion = null; drawingActive = false; return;
+    }
+    setDrawStatus('✏️ Drawing <strong>' + esc(regionName) + '</strong> on Google Maps — click to place vertices, click first point to close polygon');
+    gmapDrawingManager.setOptions({
+      polygonOptions: {
+        strokeColor: color,
+        fillColor: color,
+        strokeWeight: 2.5,
+        fillOpacity: 0.18,
+        editable: false,
+        zIndex: 10
+      }
+    });
+    gmapDrawingManager.setDrawingMode(google.maps.drawing.OverlayType.POLYGON);
+    renderDrawList();
     return;
   }
-  // Stop any existing drawing first
-  stopDrawing();
 
-  activeDrawSr = srName;
-  drawingActive = true;
+  // ── Leaflet drawing ───────────────────────────────────────────────────────
+  if (!map.pm) {
+    showAllocError('Drawing plugin not loaded. Please refresh the page.');
+    activeDrawRegion = null; drawingActive = false; return;
+  }
+  setDrawStatus('✏️ Drawing <strong>' + esc(regionName) + '</strong> — hold and drag to draw freehand, or click to place vertices, double-click to finish');
 
-  var color = SR_COLORS[srIndex % SR_COLORS.length];
-  setDrawStatus('✏️ Drawing region for <strong>' + esc(srName) + '</strong> — click to add points, double-click to finish');
-
-  // Configure Leaflet-PM for polygon drawing
   map.pm.enableDraw('Polygon', {
     snappable: false,
     cursorMarker: true,
     allowSelfIntersection: false,
+    continueDrawing: false,
+    freehand: true,
+    freehandInterval: 50,
     templineStyle: { color: color, weight: 2, dashArray: '5,5' },
     hintlineStyle: { color: color, weight: 1, dashArray: '5,5' },
     pathOptions: { color: color, weight: 2.5, fillColor: color, fillOpacity: 0.18 }
   });
 
-  // Listen for the polygon being created
   map.once('pm:create', function(e) {
     drawingActive = false;
     map.pm.disableDraw();
-
     var layer = e.layer;
-    var latlngs = layer.getLatLngs()[0]; // outer ring
+    var latlngs = layer.getLatLngs()[0];
 
-    // Validate the drawn polygon
     var validation = validateCustomRegion(latlngs);
     if (!validation.valid) {
       map.removeLayer(layer);
       setDrawStatus('❌ ' + validation.reason + ' — please try again');
-      activeDrawSr = null;
+      activeDrawRegion = null;
       renderDrawList();
       return;
     }
 
-    // Remove old region for this SR if any
-    if (customRegionLayers[srName]) {
-      map.removeLayer(customRegionLayers[srName]);
-    }
+    if (customRegionLayers[regionName]) map.removeLayer(customRegionLayers[regionName]);
 
-    // Store the polygon
-    var coords = latlngs.map(function(ll) { return [ll.lat, ll.lng]; });
-    customRegionMap[srName] = { latlngs: coords, color: color };
+    var rawCoords = latlngs.map(function(ll) { return [ll.lat, ll.lng]; });
+    var coords = simplifyPolygon(rawCoords, 0.00008);
+    if (coords.length < 3) coords = rawCoords;
+    customRegionMap[regionName] = { latlngs: coords, color: color };
 
-    // Replace the temporary layer with a styled permanent one
     map.removeLayer(layer);
     var permLayer = L.polygon(coords, {
-      color: color,
-      weight: 2.5,
-      opacity: 0.9,
-      fillColor: color,
-      fillOpacity: 0.15,
-      dashArray: null
+      color: color, weight: 2.5, opacity: 0.9,
+      fillColor: color, fillOpacity: 0.15, dashArray: null
     }).addTo(map);
-    permLayer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(srName) + ' — Custom Region</span>', { sticky: true });
-    customRegionLayers[srName] = permLayer;
+    permLayer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(regionName) + '</span>', { sticky: true });
+    customRegionLayers[regionName] = permLayer;
 
-    activeDrawSr = null;
-    setDrawStatus('✅ Region saved for <strong>' + esc(srName) + '</strong> (' + coords.length + ' points)');
+    activeDrawRegion = null;
+    setDrawStatus('✅ <strong>' + esc(regionName) + '</strong> saved (' + coords.length + ' points, simplified from ' + rawCoords.length + ')');
     renderDrawList();
   });
 
@@ -1857,28 +2234,35 @@ function startDrawingFor(srName, srIndex) {
  * Stop any active drawing.
  */
 function stopDrawing() {
+  // Cancel Leaflet drawing
   if (map.pm && map.pm.globalDrawModeEnabled()) {
     map.pm.disableDraw();
   }
+  // Cancel Google Maps drawing
+  if (gmapDrawingManager) {
+    gmapDrawingManager.setDrawingMode(null);
+  }
   drawingActive = false;
-  if (activeDrawSr) {
-    setDrawStatus('Drawing cancelled for <strong>' + esc(activeDrawSr) + '</strong>');
-    activeDrawSr = null;
+  if (activeDrawRegion) {
+    setDrawStatus('Drawing cancelled for <strong>' + esc(activeDrawRegion) + '</strong>');
+    activeDrawRegion = null;
     renderDrawList();
   }
 }
 
-/**
- * Remove a custom region for an SR.
- */
-function clearCustomRegion(srName) {
-  if (customRegionLayers[srName]) {
-    map.removeLayer(customRegionLayers[srName]);
-    delete customRegionLayers[srName];
+function clearCustomRegion(regionName) {
+  if (customRegionLayers[regionName]) {
+    map.removeLayer(customRegionLayers[regionName]);
+    delete customRegionLayers[regionName];
   }
-  delete customRegionMap[srName];
+  if (gmapCustomRegionPolygons[regionName]) {
+    gmapCustomRegionPolygons[regionName].setMap(null);
+    delete gmapCustomRegionPolygons[regionName];
+  }
+  delete customRegionMap[regionName];
+  delete regionSrCounts[regionName];
   renderDrawList();
-  setDrawStatus('Region cleared for <strong>' + esc(srName) + '</strong>');
+  setDrawStatus('Region cleared: <strong>' + esc(regionName) + '</strong>');
 }
 
 /**
@@ -1950,6 +2334,54 @@ function pointInLeafletPolygon(lat, lng, ring) {
 function setDrawStatus(html) {
   var el = document.getElementById('affinity-draw-status');
   if (el) el.innerHTML = html;
+}
+
+/**
+ * Validate a polygon drawn on Google Maps.
+ * latlngs is an array of { lat, lng } objects.
+ */
+function validateCustomRegionGmap(latlngs) {
+  if (!latlngs || latlngs.length < 3) {
+    return { valid: false, reason: 'Polygon needs at least 3 points' };
+  }
+  // Minimum area check
+  var area = 0, n = latlngs.length;
+  for (var i = 0; i < n; i++) {
+    var j = (i + 1) % n;
+    area += latlngs[i].lat * latlngs[j].lng;
+    area -= latlngs[j].lat * latlngs[i].lng;
+  }
+  var areaKm2 = Math.abs(area) / 2 * 111 * 111;
+  if (areaKm2 < 0.01) {
+    return { valid: false, reason: 'Region is too small (min 0.01 km²)' };
+  }
+  // Hub boundary overlap — if hub boundary exists, check overlap
+  if (hubBoundaryLayer) {
+    var hubLatLngs = hubBoundaryLayer.getLatLngs()[0];
+    if (hubLatLngs && hubLatLngs.length > 0) {
+      var anyInside = latlngs.some(function(pt) {
+        return pointInLeafletPolygon(pt.lat, pt.lng, hubLatLngs);
+      });
+      if (!anyInside) {
+        var hubCenter = hubBoundaryLayer.getBounds().getCenter();
+        var hubInDrawn = latlngs.some ? false : false;
+        // ray-cast hub center against drawn polygon
+        var inside = false;
+        for (var ii = 0, jj = n - 1; ii < n; jj = ii++) {
+          var yi = latlngs[ii].lat, xi = latlngs[ii].lng;
+          var yj = latlngs[jj].lat, xj = latlngs[jj].lng;
+          if ((yi > hubCenter.lat) !== (yj > hubCenter.lat) &&
+              hubCenter.lng < (xj - xi) * (hubCenter.lat - yi) / (yj - yi) + xi) {
+            inside = !inside;
+          }
+        }
+        if (!inside) {
+          return { valid: false, reason: 'Region must overlap with the hub service boundary' };
+        }
+      }
+    }
+  }
+  return { valid: true };
 }
 
 // ── SR AFFINITY MATCHING ───────────────────────────────────────────────────────
@@ -2073,18 +2505,26 @@ function updateAffinityBadge() {
     count = Object.keys(customRegionMap).filter(function(k) {
       return customRegionMap[k] && customRegionMap[k].latlngs && customRegionMap[k].latlngs.length >= 3;
     }).length;
+    var badge = document.getElementById('affinity-match-badge');
+    if (badge) badge.textContent = count + '/' + plannedRegionCount + ' drawn';
   } else {
     count = Object.keys(srAffinityMap).filter(function(k) { return srAffinityMap[k] && srAffinityMap[k].length > 0; }).length;
+    var badge2 = document.getElementById('affinity-match-badge');
+    if (badge2) badge2.textContent = count + ' defined';
   }
-  document.getElementById('affinity-match-badge').textContent = count + ' defined';
 }
 
 function clearAllAffinities() {
   srAffinityMap = {};
-  // Also clear custom regions
-  Object.keys(customRegionLayers).forEach(function(sr) { map.removeLayer(customRegionLayers[sr]); });
+  Object.keys(customRegionLayers).forEach(function(r) { if (customRegionLayers[r]) map.removeLayer(customRegionLayers[r]); });
+  Object.keys(gmapCustomRegionPolygons).forEach(function(r) { if (gmapCustomRegionPolygons[r]) gmapCustomRegionPolygons[r].setMap(null); });
   customRegionMap = {};
   customRegionLayers = {};
+  gmapCustomRegionPolygons = {};
+  regionSrCounts = {};
+  plannedRegionCount = 0;
+  var input = document.getElementById('region-count-input');
+  if (input) input.value = 3;
   stopDrawing();
   fetch('/api/affinity-match/clear', { method: 'DELETE' }).catch(function() {});
   renderAffinityList();
@@ -2100,19 +2540,44 @@ function runAffinityAllocation() {
   // ── Draw mode: use custom polygon regions ──────────────────────────────────
   if (affinityMode === 'draw') {
     var regions = {};
+    var srCounts = {};
     var count = 0;
-    for (var sr in customRegionMap) {
-      if (customRegionMap[sr] && customRegionMap[sr].latlngs && customRegionMap[sr].latlngs.length >= 3) {
-        regions[sr] = customRegionMap[sr].latlngs; // [[lat,lng], ...]
+    var totalSrAssigned = 0;
+    var presentCount = presentSrNames ? presentSrNames.length : 0;
+
+    for (var r in customRegionMap) {
+      if (customRegionMap[r] && customRegionMap[r].latlngs && customRegionMap[r].latlngs.length >= 3) {
+        regions[r] = customRegionMap[r].latlngs;
+        var srN = regionSrCounts[r];
+        if (srN && srN > 0) {
+          srCounts[r] = srN;
+          totalSrAssigned += srN;
+        }
         count++;
       }
     }
-    if (count === 0) { showAllocError('Draw at least one custom region before running.'); return; }
+    if (count === 0) { showAllocError('Draw at least one region before running.'); return; }
+    if (count < plannedRegionCount) {
+      if (!confirm('Only ' + count + ' of ' + plannedRegionCount + ' regions drawn. Continue with ' + count + ' regions?')) return;
+    }
+
+    // Validate SR counts if any were specified
+    if (Object.keys(srCounts).length > 0) {
+      if (totalSrAssigned > presentCount) {
+        showAllocError('Total SRs assigned (' + totalSrAssigned + ') exceeds present SR count (' + presentCount + '). Please reduce SR counts.');
+        return;
+      }
+      // Warn if some regions have no SR count set
+      var missingCount = count - Object.keys(srCounts).length;
+      if (missingCount > 0) {
+        if (!confirm(missingCount + ' region(s) have no SR count set — they will receive SRs proportionally from the remaining ' + (presentCount - totalSrAssigned) + '. Continue?')) return;
+      }
+    }
 
     fetch('/api/affinity-match/set-custom-regions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regions: regions })
+      body: JSON.stringify({ regions: regions, srCounts: srCounts })
     })
     .then(function(r) { return r.json(); })
     .then(function(setResult) {
