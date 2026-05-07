@@ -80,7 +80,7 @@ public class AllocationEngineService {
     @Value("${allocation.sr.capacity.min:80}")
     private int srCapacityMin;
 
-    @Value("${allocation.sr.capacity.max:100}")
+    @Value("${allocation.sr.capacity.max:80}")
     private int srCapacityMax;
 
     /**

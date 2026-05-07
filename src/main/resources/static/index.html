@@ -252,6 +252,43 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 
     </div>
 
+    <!-- SR Affinity Panel (above attendance) -->
+    <div class="panel" id="affinity-match-panel">
+      <div class="panel-title">
+        🗺 Affinity Zones
+        <span class="badge" id="affinity-match-badge" style="background:#8e24aa">0 drawn</span>
+      </div>
+
+      <!-- Draw Region mode only (pincode mode removed per user request) -->
+      <div id="affinity-draw-mode">
+        <div style="font-size:.74rem;color:#6c757d;margin-bottom:8px">
+          Draw delivery zones on the map. Each SR is assigned to one zone.
+        </div>
+        <!-- Region count input -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <label style="font-size:.76rem;font-weight:600;color:#343a40;white-space:nowrap">Zones to draw:</label>
+          <input type="number" id="region-count-input" min="1" max="20" value="3"
+                 style="width:60px;padding:4px 6px;border:1px solid #ced4da;border-radius:4px;font-size:.8rem;font-weight:600"
+                 onchange="onRegionCountChange()"/>
+          <button onclick="applyRegionCount()"
+                  style="padding:4px 10px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#1976d2;color:#fff">
+            Set
+          </button>
+        </div>
+        <div id="affinity-draw-list" style="max-height:200px;overflow-y:auto;margin-bottom:6px">
+          <div class="empty-text">Set zone count above to start drawing</div>
+        </div>
+        <div id="affinity-draw-status" style="font-size:.72rem;color:#6c757d;margin-bottom:6px;min-height:18px"></div>
+      </div>
+
+      <div style="display:flex;gap:5px">
+        <button class="btn btn-primary" style="flex:1;font-size:.76rem" onclick="runAffinityAllocation()">🎯 Run with Affinity</button>
+        <button class="btn btn-secondary" style="font-size:.76rem" onclick="saveRegionsToStorage()" title="Save zones to disk">💾 Save</button>
+        <button class="btn btn-secondary" style="font-size:.76rem" onclick="clearAllAffinities()">Clear</button>
+      </div>
+      <div id="affinity-match-result" style="margin-top:6px"></div>
+    </div>
+
     <!-- Attendance -->
     <div class="panel">
       <div class="panel-title">
@@ -267,64 +304,10 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <button class="btn btn-primary" style="font-size:.76rem;white-space:nowrap" onclick="addNewSr()">+ Add SR</button>
       </div>
       <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
-    </div>
-
-    <!-- SR Affinity Panel -->
-    <div class="panel" id="affinity-match-panel" style="display:none">
-      <div class="panel-title">
-        SR Affinity
-        <span class="badge" id="affinity-match-badge" style="background:#8e24aa">0 defined</span>
+      <div id="sr-zone-save-row" style="display:none;margin-top:8px">
+        <button class="btn btn-primary" style="width:100%;font-size:.76rem" onclick="saveRegionsToStorage();showSrZoneSaved()">💾 Save SR Zone Assignments</button>
+        <div id="sr-zone-saved-msg" style="display:none;font-size:.72rem;color:#2e7d32;text-align:center;margin-top:4px">✅ SR zone assignments saved</div>
       </div>
-
-      <!-- Mode toggle: Pincode vs Custom Region -->
-      <div style="display:flex;gap:3px;margin-bottom:8px;background:#f8f9fa;border-radius:6px;padding:3px">
-        <button id="affinity-mode-pincode-btn"
-                onclick="setAffinityMode('pincode')"
-                style="flex:1;padding:5px 8px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#8e24aa;color:#fff;transition:all .2s">
-          📍 Pincode
-        </button>
-        <button id="affinity-mode-draw-btn"
-                onclick="setAffinityMode('draw')"
-                style="flex:1;padding:5px 8px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#e9ecef;color:#495057;transition:all .2s">
-          ✏️ Draw Region
-        </button>
-      </div>
-
-      <!-- Pincode mode -->
-      <div id="affinity-pincode-mode">
-        <div style="font-size:.74rem;color:#6c757d;margin-bottom:6px">Assign <strong>one pincode per SR</strong>. Each SR receives <strong>only</strong> shipments from their assigned pincode — no cross-pincode allocation.</div>
-        <div id="affinity-match-list" style="max-height:200px;overflow-y:auto;margin-bottom:8px">
-          <div class="empty-text">Select a date and load attendance first</div>
-        </div>
-      </div>
-
-      <!-- Draw Region mode -->
-      <div id="affinity-draw-mode" style="display:none">
-        <div style="font-size:.74rem;color:#6c757d;margin-bottom:8px">
-          Define how many affinity regions to draw, then draw each one on the map. SRs are assigned to regions automatically based on shipment density.
-        </div>
-        <!-- Region count input -->
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-          <label style="font-size:.76rem;font-weight:600;color:#343a40;white-space:nowrap">Regions to draw:</label>
-          <input type="number" id="region-count-input" min="1" max="20" value="3"
-                 style="width:60px;padding:4px 6px;border:1px solid #ced4da;border-radius:4px;font-size:.8rem;font-weight:600"
-                 onchange="onRegionCountChange()"/>
-          <button onclick="applyRegionCount()"
-                  style="padding:4px 10px;font-size:.74rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#1976d2;color:#fff">
-            Set
-          </button>
-        </div>
-        <div id="affinity-draw-list" style="max-height:220px;overflow-y:auto;margin-bottom:8px">
-          <div class="empty-text">Set region count above to start drawing</div>
-        </div>
-        <div id="affinity-draw-status" style="font-size:.72rem;color:#6c757d;margin-bottom:6px;min-height:18px"></div>
-      </div>
-
-      <div style="display:flex;gap:5px">
-        <button class="btn btn-primary" style="flex:1;font-size:.76rem" onclick="runAffinityAllocation()">🎯 Run with Affinity</button>
-        <button class="btn btn-secondary" style="font-size:.76rem" onclick="clearAllAffinities()">Clear</button>
-      </div>
-      <div id="affinity-match-result" style="margin-top:6px"></div>
     </div>
 
     <!-- Summary -->
@@ -442,6 +425,19 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <span style="width:10px;height:10px;border-radius:50%;background:#fff;
                      margin-left:auto;transition:margin .2s;display:block"></span>
       </span>
+    </div>
+
+    <!-- Raw shipment plot button — bottom-right, above toggle -->
+    <div id="raw-plot-btn"
+         onclick="toggleRawShipmentPlot()"
+         title="Plot all uploaded shipments by lat/lng — no zone or SR filter"
+         style="position:absolute;bottom:56px;right:12px;z-index:10001;
+                background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:6px;
+                padding:6px 10px;cursor:pointer;font-size:.75rem;font-weight:600;
+                box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;gap:6px;
+                user-select:none;line-height:1.3">
+      <span style="font-size:.9rem">📦</span>
+      <span id="raw-plot-label">Plot All Points</span>
     </div>
   </div>
 </div>
@@ -700,6 +696,7 @@ function initGoogleMap() {
       activeDrawRegion = null;
       drawingActive = false;
       setDrawStatus('✅ <strong>' + esc(regionName) + '</strong> saved (' + coords.length + ' points, simplified from ' + rawCoords.length + ')');
+      saveRegionsToStorage(); // auto-persist whenever a region is completed
       renderDrawList();
     });
   }
@@ -888,6 +885,8 @@ function loadConfig() {
       hubMarker.setLatLng([HUB_LAT, HUB_LNG]);
       // Eagerly fetch hub boundary as soon as we know the hub name
       if (lastHubName) fetchHubBoundary(lastHubName);
+      // Load saved affinity regions from storage
+      loadRegionsFromStorage();
     })
     .catch(function() {});
 
@@ -1395,12 +1394,48 @@ function renderAttendance(attendees) {
   presentSrNames = attendees.filter(function(a) { return a.present; }).map(function(a) { return a.srName; });
   updatePresentBadge(attendees);
   if (!attendees.length) { list.innerHTML = '<div class="empty-text">No SRs registered</div>'; return; }
+
+  // Build zone options from drawn regions
+  var zoneOptions = '<option value="">— No Zone —</option>';
+  for (var i = 1; i <= plannedRegionCount; i++) {
+    var rName = 'Region ' + i;
+    var hasRegion = customRegionMap[rName] && customRegionMap[rName].latlngs && customRegionMap[rName].latlngs.length >= 3;
+    if (hasRegion) {
+      var color = REGION_COLORS[(i - 1) % REGION_COLORS.length];
+      zoneOptions += '<option value="' + esc(rName) + '">' + esc(rName) + '</option>';
+    }
+  }
+  var hasZones = Object.keys(customRegionMap).some(function(k) {
+    return customRegionMap[k] && customRegionMap[k].latlngs && customRegionMap[k].latlngs.length >= 3;
+  });
+
   var h = '';
   attendees.forEach(function(a) {
-    h += '<div class="sr-attendance-item"><span>' + esc(a.srName) + '</span>';
-    h += '<label class="toggle-switch"><input type="checkbox" ' + (a.present ? 'checked' : '') + ' ' + (allocationFinalized ? 'disabled' : '') + ' data-sr="' + esc(a.srName) + '" onchange="toggleAttendance(this)"><span class="toggle-slider"></span></label></div>';
+    var assignedZone = srZoneMap[a.srName] || '';
+    h += '<div class="sr-attendance-item" style="flex-wrap:wrap;gap:4px">';
+    h += '<span style="min-width:60px;font-weight:600">' + esc(a.srName) + '</span>';
+    if (hasZones) {
+      h += '<select data-sr-zone="' + esc(a.srName) + '" onchange="updateSrZone(this)"'
+        + ' style="flex:1;min-width:90px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;color:#343a40">';
+      h += zoneOptions;
+      h += '</select>';
+    }
+    h += '<label class="toggle-switch" style="flex-shrink:0"><input type="checkbox" '
+      + (a.present ? 'checked' : '') + ' '
+      + (allocationFinalized ? 'disabled' : '')
+      + ' data-sr="' + esc(a.srName) + '" onchange="toggleAttendance(this)">'
+      + '<span class="toggle-slider"></span></label>';
+    h += '</div>';
   });
   list.innerHTML = h;
+
+  // Restore saved zone selections
+  if (hasZones) {
+    document.querySelectorAll('[data-sr-zone]').forEach(function(sel) {
+      var sr = sel.getAttribute('data-sr-zone');
+      if (srZoneMap[sr]) sel.value = srZoneMap[sr];
+    });
+  }
 }
 
 function updatePresentBadge(attendees) {
@@ -1970,15 +2005,97 @@ function toggleShipmentDisplay() {
   }
 }
 
+// ── RAW SHIPMENT PLOT ─────────────────────────────────────────────────────────
+// Plots ALL uploaded shipments as simple dots by lat/lng — no SR, no zone filter.
+var rawPlotActive = false;
+var rawPlotLayerGroup = null;
+
+function toggleRawShipmentPlot() {
+  var btn   = document.getElementById('raw-plot-btn');
+  var label = document.getElementById('raw-plot-label');
+
+  if (rawPlotActive) {
+    // Hide raw plot
+    if (rawPlotLayerGroup) { map.removeLayer(rawPlotLayerGroup); rawPlotLayerGroup = null; }
+    rawPlotActive = false;
+    if (btn)   btn.style.background = '#fff';
+    if (label) label.textContent = 'Plot All Points';
+    return;
+  }
+
+  var date = document.getElementById('date-select').value;
+  if (!date) { showAllocError('Select a date first to plot shipments.'); return; }
+
+  if (btn)   btn.style.background = '#e3f2fd';
+  if (label) label.textContent = 'Loading...';
+
+  fetch('/api/shipments/' + encodeURIComponent(date))
+    .then(function(r) { return r.json(); })
+    .then(function(shipments) {
+      if (!shipments || !shipments.length) {
+        showAllocError('No shipments found for this date.');
+        if (btn)   btn.style.background = '#fff';
+        if (label) label.textContent = 'Plot All Points';
+        return;
+      }
+
+      if (rawPlotLayerGroup) map.removeLayer(rawPlotLayerGroup);
+      rawPlotLayerGroup = L.layerGroup();
+
+      var plotted = 0;
+      shipments.forEach(function(s) {
+        var lat = s.latitude;
+        var lng = s.longitude;
+        if (lat == null || lng == null || (lat === 0 && lng === 0)) return;
+
+        var marker = L.circleMarker([lat, lng], {
+          radius: 4,
+          color: '#1565c0',
+          fillColor: '#42a5f5',
+          fillOpacity: 0.8,
+          weight: 1,
+          interactive: true
+        });
+        marker.bindTooltip(
+          '<span style="font-size:.72rem">' +
+          '<b>' + esc(s.shipmentId || '') + '</b><br>' +
+          'Pincode: ' + esc(s.pincode || '—') + '<br>' +
+          'Lat: ' + lat.toFixed(5) + ', Lng: ' + lng.toFixed(5) +
+          '</span>',
+          { sticky: true }
+        );
+        rawPlotLayerGroup.addLayer(marker);
+        plotted++;
+      });
+
+      rawPlotLayerGroup.addTo(map);
+      rawPlotActive = true;
+      if (btn)   btn.style.background = '#bbdefb';
+      if (label) label.textContent = '📦 ' + plotted + ' Points (ON)';
+
+      // Fit map to plotted points
+      if (plotted > 0) {
+        var bounds = rawPlotLayerGroup.getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
+      }
+    })
+    .catch(function(e) {
+      showAllocError('Failed to load shipments: ' + e.message);
+      if (btn)   btn.style.background = '#fff';
+      if (label) label.textContent = 'Plot All Points';
+    });
+}
+
 // ── CUSTOM AFFINITY REGION DRAWING ───────────────────────────────────────────
 // Stores drawn polygons per region: { "Region 1": { latlngs: [[lat,lng]...], color: '#...' } }
 var customRegionMap = {};
 var customRegionLayers = {};    // { "Region 1": L.polygon }
-var affinityMode = 'pincode';   // 'pincode' | 'draw'
+var affinityMode = 'draw';      // always draw mode now
 var activeDrawRegion = null;    // region name currently being drawn
 var drawingActive = false;
 var plannedRegionCount = 0;     // how many regions the user wants to draw
 var regionSrCounts = {};        // { "Region 1": 2, "Region 2": 3 } — user-specified SR count per region
+var srZoneMap = {};             // { "SR-001": "Region 1", "SR-002": "Region 2" } — SR → zone assignment
 
 // Distinct colors for numbered regions
 var REGION_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa',
@@ -1988,24 +2105,10 @@ var REGION_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa',
 
 function setAffinityMode(mode) {
   affinityMode = mode;
-  var pincodeBtn = document.getElementById('affinity-mode-pincode-btn');
-  var drawBtn    = document.getElementById('affinity-mode-draw-btn');
-  var pincodeDiv = document.getElementById('affinity-pincode-mode');
-  var drawDiv    = document.getElementById('affinity-draw-mode');
-
-  if (mode === 'pincode') {
-    pincodeBtn.style.background = '#8e24aa'; pincodeBtn.style.color = '#fff';
-    drawBtn.style.background = '#e9ecef';    drawBtn.style.color = '#495057';
-    pincodeDiv.style.display = 'block';
-    drawDiv.style.display = 'none';
-    stopDrawing();
-  } else {
-    drawBtn.style.background = '#8e24aa'; drawBtn.style.color = '#fff';
-    pincodeBtn.style.background = '#e9ecef'; pincodeBtn.style.color = '#495057';
-    pincodeDiv.style.display = 'none';
-    drawDiv.style.display = 'block';
-    renderDrawList();
-  }
+  // Mode toggle buttons and pincode div no longer exist — draw mode is always active
+  var drawDiv = document.getElementById('affinity-draw-mode');
+  if (drawDiv) drawDiv.style.display = 'block';
+  if (mode === 'draw') renderDrawList();
   updateAffinityBadge();
 }
 
@@ -2038,32 +2141,20 @@ function applyRegionCount() {
 function renderDrawList() {
   var container = document.getElementById('affinity-draw-list');
   if (plannedRegionCount === 0) {
-    container.innerHTML = '<div class="empty-text">Set region count above to start drawing</div>';
+    container.innerHTML = '<div class="empty-text">Set zone count above to start drawing</div>';
     return;
   }
 
-  var totalAssigned = Object.values(regionSrCounts).reduce(function(s, v) { return s + (v || 0); }, 0);
-  var presentCount = presentSrNames ? presentSrNames.length : 0;
-
   var h = '';
-  // Header row showing total SR assignment status
-  if (presentCount > 0) {
-    var remaining = presentCount - totalAssigned;
-    var statusColor = remaining === 0 ? '#2e7d32' : (remaining < 0 ? '#c62828' : '#e65100');
-    h += '<div style="font-size:.72rem;color:' + statusColor + ';font-weight:600;margin-bottom:6px;padding:4px 6px;background:#f8f9fa;border-radius:4px">';
-    h += 'SRs assigned: ' + totalAssigned + ' / ' + presentCount;
-    if (remaining > 0) h += ' (' + remaining + ' unassigned)';
-    else if (remaining < 0) h += ' ⚠️ over-assigned by ' + Math.abs(remaining);
-    else h += ' ✅ all assigned';
-    h += '</div>';
-  }
 
   for (var i = 1; i <= plannedRegionCount; i++) {
     var regionName = 'Region ' + i;
     var color = REGION_COLORS[(i - 1) % REGION_COLORS.length];
     var hasRegion = customRegionMap[regionName] && customRegionMap[regionName].latlngs && customRegionMap[regionName].latlngs.length >= 3;
     var isActive  = activeDrawRegion === regionName;
-    var srCount   = regionSrCounts[regionName] || '';
+
+    // Count SRs assigned to this region from srZoneMap
+    var srCount = Object.keys(srZoneMap).filter(function(sr) { return srZoneMap[sr] === regionName; }).length;
 
     h += '<div style="display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
     h += '<div style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>';
@@ -2075,17 +2166,12 @@ function renderDrawList() {
       h += '<button onclick="startDrawingFor(\'' + esc(regionName) + '\',' + (i-1) + ')" style="padding:3px 6px;font-size:.7rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:' + (hasRegion ? '#43a047' : '#1976d2') + ';color:#fff">' + (hasRegion ? '✏️ Redraw' : '✏️ Draw') + '</button>';
     }
 
-    // SR count input — only shown when region is drawn
     if (hasRegion && !isActive) {
-      h += '<input type="number" min="1" max="' + presentCount + '" value="' + esc(String(srCount)) + '" placeholder="SRs"'
-        + ' data-region="' + esc(regionName) + '"'
-        + ' onchange="updateRegionSrCount(this)"'
-        + ' style="width:46px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;text-align:center"'
-        + ' title="Number of SRs to assign to ' + esc(regionName) + '"/>';
-      h += '<span style="font-size:.65rem;color:#6c757d">SRs</span>';
-      h += '<button onclick="clearCustomRegion(\'' + esc(regionName) + '\')" title="Remove region" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#ffebee;color:#c62828">✕</button>';
+      // Show SR count badge (derived from attendance zone dropdowns)
+      h += '<span style="background:#e8f5e9;color:#2e7d32;border-radius:10px;padding:1px 7px;font-size:.68rem;font-weight:700;flex-shrink:0">' + srCount + ' SR' + (srCount !== 1 ? 's' : '') + '</span>';
+      h += '<button onclick="startEditRegion(\'' + esc(regionName) + '\')" title="Edit vertices" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#e3f2fd;color:#1565c0">✏</button>';
+      h += '<button onclick="clearCustomRegion(\'' + esc(regionName) + '\')" title="Remove zone" style="padding:3px 5px;font-size:.7rem;border:none;border-radius:4px;cursor:pointer;background:#ffebee;color:#c62828">✕</button>';
     } else if (!isActive) {
-      // Region not drawn yet — placeholder to keep layout consistent
       h += '<span style="flex:1;font-size:.68rem;color:#adb5bd;font-style:italic">draw first</span>';
     }
 
@@ -2101,6 +2187,95 @@ function updateRegionSrCount(input) {
   if (isNaN(val) || val < 1) { val = 1; input.value = 1; }
   regionSrCounts[regionName] = val;
   // Re-render just the header status without full re-render (avoids losing focus)
+  renderDrawList();
+}
+
+/**
+ * Called when an SR's zone dropdown changes.
+ * Saves the SR→zone mapping and persists to storage.
+ */
+function updateSrZone(select) {
+  var srName = select.getAttribute('data-sr-zone');
+  var zone = select.value;
+  if (zone) {
+    srZoneMap[srName] = zone;
+  } else {
+    delete srZoneMap[srName];
+  }
+  saveRegionsToStorage(); // persist SR→zone assignments
+}
+
+// Track which region is currently being edited
+var editingRegionName = null;
+
+/**
+ * Enable Leaflet-PM vertex editing on a specific region polygon.
+ * Shows draggable vertex handles — user drags to reshape, then clicks "Done".
+ */
+function startEditRegion(regionName) {
+  // Stop any other edit in progress
+  if (editingRegionName) stopEditRegion(editingRegionName, false);
+
+  var layer = customRegionLayers[regionName];
+  if (!layer) return;
+
+  editingRegionName = regionName;
+
+  // Enable PM editing on this layer — shows draggable vertex circles
+  layer.pm.enable({
+    allowSelfIntersection: false,
+    draggable: true,
+    addVertexOn: 'click',
+    removeVertexOn: 'contextmenu'
+  });
+
+  // Show a "Done Editing" button in the draw status bar
+  setDrawStatus(
+    '✏️ Editing <strong>' + esc(regionName) + '</strong> — drag vertices to reshape. ' +
+    '<button onclick="stopEditRegion(\'' + esc(regionName) + '\', true)" ' +
+    'style="padding:2px 8px;font-size:.72rem;font-weight:600;border:none;border-radius:4px;cursor:pointer;background:#43a047;color:#fff;margin-left:6px">✅ Done</button>'
+  );
+
+  // Zoom to the region so vertices are easy to grab
+  map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+}
+
+/**
+ * Disable PM editing, capture updated coordinates, save.
+ */
+function stopEditRegion(regionName, save) {
+  var layer = customRegionLayers[regionName];
+  if (!layer) { editingRegionName = null; return; }
+
+  layer.pm.disable();
+  editingRegionName = null;
+
+  if (save) {
+    // Capture the updated vertex positions
+    var latlngs = layer.getLatLngs();
+    // Flatten nested arrays (PM returns [[LatLng, ...]])
+    var flat = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
+    var coords = flat.map(function(ll) { return [ll.lat, ll.lng]; });
+
+    if (coords.length >= 3) {
+      customRegionMap[regionName] = { latlngs: coords, color: customRegionMap[regionName].color };
+      // Redraw the layer with updated coords
+      map.removeLayer(layer);
+      var color = customRegionMap[regionName].color;
+      var newLayer = L.polygon(coords, {
+        color: color, weight: 2.5, opacity: 0.9,
+        fillColor: color, fillOpacity: 0.15, dashArray: null
+      }).addTo(map);
+      newLayer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(regionName) + '</span>', { sticky: true });
+      customRegionLayers[regionName] = newLayer;
+
+      saveRegionsToStorage();
+      setDrawStatus('✅ <strong>' + esc(regionName) + '</strong> updated and saved');
+    }
+  } else {
+    setDrawStatus('');
+  }
+
   renderDrawList();
 }
 
@@ -2224,6 +2399,7 @@ function startDrawingFor(regionName, colorIndex) {
 
     activeDrawRegion = null;
     setDrawStatus('✅ <strong>' + esc(regionName) + '</strong> saved (' + coords.length + ' points, simplified from ' + rawCoords.length + ')');
+    saveRegionsToStorage(); // auto-persist whenever a region is completed
     renderDrawList();
   });
 
@@ -2234,6 +2410,8 @@ function startDrawingFor(regionName, colorIndex) {
  * Stop any active drawing.
  */
 function stopDrawing() {
+  // Cancel any active vertex editing first
+  if (editingRegionName) stopEditRegion(editingRegionName, false);
   // Cancel Leaflet drawing
   if (map.pm && map.pm.globalDrawModeEnabled()) {
     map.pm.disableDraw();
@@ -2454,68 +2632,33 @@ function loadAvailablePincodes() {
 
 function renderAffinityList() {
   var container = document.getElementById('affinity-match-list');
-  if (!presentSrNames || !presentSrNames.length) {
-    container.innerHTML = '<div class="empty-text">Mark SRs present first</div>';
-    return;
-  }
-
-  // Build pincode options from available pincodes
-  var pinOptions = '<option value="">— unassigned —</option>';
-  availablePincodes.forEach(function(p) {
-    pinOptions += '<option value="' + esc(p.pincode) + '">' + esc(p.pincode) + ' (' + p.count + ')</option>';
-  });
-
-  var h = '';
-  presentSrNames.forEach(function(sr, i) {
-    var color = SR_COLORS[i % SR_COLORS.length];
-    // Strict mode: one pincode per SR
-    var assignedPin = (srAffinityMap[sr] && srAffinityMap[sr].length > 0) ? srAffinityMap[sr][0] : '';
-    h += '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.76rem">';
-    h += '<div style="width:9px;height:9px;border-radius:50%;background:' + color + ';flex-shrink:0"></div>';
-    h += '<div style="min-width:52px;font-weight:600;color:#212529">' + esc(sr) + '</div>';
-    h += '<select data-sr="' + esc(sr) + '" onchange="updateSrAffinityStrict(this)" style="flex:1;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;background:#fff">';
-    h += pinOptions.replace('value="' + assignedPin + '"', 'value="' + assignedPin + '" selected');
-    h += '</select>';
-    if (assignedPin) {
-      h += '<span style="font-size:.65rem;color:#8e24aa;font-weight:700">✓</span>';
-    }
-    h += '</div>';
-  });
-  container.innerHTML = h;
-  updateAffinityBadge();
+  if (!container) return; // element removed — pincode mode no longer in use
 }
 
 function updateSrAffinityStrict(select) {
   var sr = select.getAttribute('data-sr');
   var val = select.value.trim();
   if (val) {
-    srAffinityMap[sr] = [val]; // STRICT: exactly one pincode per SR
-    highlightPincodeOnMap(val); // show exact GeoJSON boundary, not a bounding box
+    srAffinityMap[sr] = [val];
+    highlightPincodeOnMap(val);
   } else {
     delete srAffinityMap[sr];
-    highlightPincodeOnMap(null); // clear highlight
+    highlightPincodeOnMap(null);
   }
   updateAffinityBadge();
-  renderAffinityList(); // re-render to show checkmarks
 }
 
 function updateAffinityBadge() {
-  var count;
-  if (affinityMode === 'draw') {
-    count = Object.keys(customRegionMap).filter(function(k) {
-      return customRegionMap[k] && customRegionMap[k].latlngs && customRegionMap[k].latlngs.length >= 3;
-    }).length;
-    var badge = document.getElementById('affinity-match-badge');
-    if (badge) badge.textContent = count + '/' + plannedRegionCount + ' drawn';
-  } else {
-    count = Object.keys(srAffinityMap).filter(function(k) { return srAffinityMap[k] && srAffinityMap[k].length > 0; }).length;
-    var badge2 = document.getElementById('affinity-match-badge');
-    if (badge2) badge2.textContent = count + ' defined';
-  }
+  var count = Object.keys(customRegionMap).filter(function(k) {
+    return customRegionMap[k] && customRegionMap[k].latlngs && customRegionMap[k].latlngs.length >= 3;
+  }).length;
+  var badge = document.getElementById('affinity-match-badge');
+  if (badge) badge.textContent = count + '/' + plannedRegionCount + ' drawn';
 }
 
 function clearAllAffinities() {
   srAffinityMap = {};
+  srZoneMap = {};
   Object.keys(customRegionLayers).forEach(function(r) { if (customRegionLayers[r]) map.removeLayer(customRegionLayers[r]); });
   Object.keys(gmapCustomRegionPolygons).forEach(function(r) { if (gmapCustomRegionPolygons[r]) gmapCustomRegionPolygons[r].setMap(null); });
   customRegionMap = {};
@@ -2527,107 +2670,161 @@ function clearAllAffinities() {
   if (input) input.value = 3;
   stopDrawing();
   fetch('/api/affinity-match/clear', { method: 'DELETE' }).catch(function() {});
+  // Also clear persisted storage
+  fetch('/api/affinity-config/clear', { method: 'DELETE' }).catch(function() {});
   renderAffinityList();
   renderDrawList();
   document.getElementById('affinity-match-result').innerHTML = '';
   setDrawStatus('');
 }
 
+// ── REGION PERSISTENCE ────────────────────────────────────────────────────────
+
+/**
+ * Save all drawn regions to backend storage (data/affinity-config.json).
+ * Called automatically after every region is drawn or cleared.
+ */
+function saveRegionsToStorage() {
+  var regions = [];
+  Object.keys(customRegionMap).forEach(function(name) {
+    var r = customRegionMap[name];
+    if (r && r.latlngs && r.latlngs.length >= 3) {
+      regions.push({
+        id: name,
+        name: name,
+        color: r.color || '#e53935',
+        polygon: r.latlngs,
+        assignedSRs: [],
+        srCount: regionSrCounts[name] || 2
+      });
+    }
+  });
+  var payload = {
+    hubId: lastHubName || 'PNQ HDP',
+    regionCount: plannedRegionCount,
+    regions: regions,
+    srZoneMap: srZoneMap   // persist SR→zone assignments
+  };
+  fetch('/api/affinity-config/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.success) {
+      setDrawStatus('✅ All zones auto-saved (' + regions.length + ' zones, ' + Object.keys(srZoneMap).length + ' SR assignments)');
+    }
+  })
+  .catch(function() { /* silent */ });
+}
+
+/**
+ * Load previously saved regions from backend storage and restore them on the map.
+ * Called on page load.
+ */
+function loadRegionsFromStorage() {
+  fetch('/api/affinity-config/load')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || !data.regions || data.regions.length === 0) return;
+
+      // Restore region count
+      if (data.regionCount && data.regionCount > 0) {
+        plannedRegionCount = data.regionCount;
+        var input = document.getElementById('region-count-input');
+        if (input) input.value = plannedRegionCount;
+      }
+
+      // Restore each region onto the map
+      data.regions.forEach(function(r) {
+        if (!r.polygon || r.polygon.length < 3) return;
+        var regionName = r.name || r.id;
+        var color = r.color || '#e53935';
+        customRegionMap[regionName] = { latlngs: r.polygon, color: color };
+        if (r.srCount) regionSrCounts[regionName] = r.srCount;
+
+        // Draw on Leaflet map
+        if (customRegionLayers[regionName]) map.removeLayer(customRegionLayers[regionName]);
+        var layer = L.polygon(r.polygon, {
+          color: color, weight: 2.5, opacity: 0.9,
+          fillColor: color, fillOpacity: 0.15, dashArray: null
+        }).addTo(map);
+        layer.bindTooltip('<span style="font-size:.75rem;font-weight:600;color:' + color + '">' + esc(regionName) + '</span>', { sticky: true });
+        customRegionLayers[regionName] = layer;
+      });
+
+      // Restore SR→zone assignments
+      if (data.srZoneMap && typeof data.srZoneMap === 'object') {
+        Object.keys(data.srZoneMap).forEach(function(sr) {
+          srZoneMap[sr] = data.srZoneMap[sr];
+        });
+      }
+
+      // Switch to draw mode and render the list
+      setAffinityMode('draw');
+      // Show the affinity panel if it's hidden
+      var panel = document.getElementById('affinity-match-panel');
+      if (panel) panel.style.display = 'block';
+      renderDrawList();
+      updateAffinityBadge();
+      setDrawStatus('📂 Loaded ' + data.regions.length + ' saved zones');
+    })
+    .catch(function() { /* no saved config — that's fine */ });
+}
+
 function runAffinityAllocation() {
   var date = document.getElementById('date-select').value;
   if (!date) { showAllocError('Select a date first.'); return; }
 
-  // ── Draw mode: use custom polygon regions ──────────────────────────────────
-  if (affinityMode === 'draw') {
-    var regions = {};
-    var srCounts = {};
-    var count = 0;
-    var totalSrAssigned = 0;
-    var presentCount = presentSrNames ? presentSrNames.length : 0;
+  // Always draw mode now
+  var regions = {};
+  var srCounts = {};
+  var count = 0;
 
-    for (var r in customRegionMap) {
-      if (customRegionMap[r] && customRegionMap[r].latlngs && customRegionMap[r].latlngs.length >= 3) {
-        regions[r] = customRegionMap[r].latlngs;
-        var srN = regionSrCounts[r];
-        if (srN && srN > 0) {
-          srCounts[r] = srN;
-          totalSrAssigned += srN;
-        }
-        count++;
-      }
+  for (var r in customRegionMap) {
+    if (customRegionMap[r] && customRegionMap[r].latlngs && customRegionMap[r].latlngs.length >= 3) {
+      regions[r] = customRegionMap[r].latlngs;
+      count++;
     }
-    if (count === 0) { showAllocError('Draw at least one region before running.'); return; }
-    if (count < plannedRegionCount) {
-      if (!confirm('Only ' + count + ' of ' + plannedRegionCount + ' regions drawn. Continue with ' + count + ' regions?')) return;
-    }
-
-    // Validate SR counts if any were specified
-    if (Object.keys(srCounts).length > 0) {
-      if (totalSrAssigned > presentCount) {
-        showAllocError('Total SRs assigned (' + totalSrAssigned + ') exceeds present SR count (' + presentCount + '). Please reduce SR counts.');
-        return;
-      }
-      // Warn if some regions have no SR count set
-      var missingCount = count - Object.keys(srCounts).length;
-      if (missingCount > 0) {
-        if (!confirm(missingCount + ' region(s) have no SR count set — they will receive SRs proportionally from the remaining ' + (presentCount - totalSrAssigned) + '. Continue?')) return;
-      }
-    }
-
-    fetch('/api/affinity-match/set-custom-regions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regions: regions, srCounts: srCounts })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(setResult) {
-      if (setResult.error) { showAllocError(setResult.error); return; }
-      return fetch('/api/affinity-match/allocate-custom', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: date })
-      });
-    })
-    .then(function(r) { if (r) return r.json(); })
-    .then(function(data) {
-      if (!data) return;
-      if (data.error) { showAllocError(data.error); return; }
-      _handleAffinityResult(data, date);
-    })
-    .catch(function(e) { showAllocError('Custom region allocation failed: ' + e.message); });
-    return;
+  }
+  if (count === 0) { showAllocError('Draw at least one zone before running.'); return; }
+  if (count < plannedRegionCount) {
+    if (!confirm('Only ' + count + ' of ' + plannedRegionCount + ' zones drawn. Continue with ' + count + ' zones?')) return;
   }
 
-  // ── Pincode mode: use pincode-based affinity ───────────────────────────────
-  var affinities = {};
-  for (var sr in srAffinityMap) {
-    if (srAffinityMap[sr] && srAffinityMap[sr].length > 0) {
-      affinities[sr] = srAffinityMap[sr];
+  // Build srCounts from srZoneMap — count how many SRs are assigned to each region
+  for (var sr in srZoneMap) {
+    var zone = srZoneMap[sr];
+    if (zone && regions[zone]) {
+      srCounts[zone] = (srCounts[zone] || 0) + 1;
     }
   }
 
-  // Step 1: Set affinities
-  fetch('/api/affinity-match/set', {
+  fetch('/api/affinity-match/set-custom-regions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ affinities: affinities })
+    body: JSON.stringify({ regions: regions, srCounts: srCounts, srZoneMap: srZoneMap })
   })
-  .then(function() {
-    return fetch('/api/affinity-match/allocate', {
+  .then(function(r) { return r.json(); })
+  .then(function(setResult) {
+    if (setResult.error) { showAllocError(setResult.error); return; }
+    return fetch('/api/affinity-match/allocate-custom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ date: date })
     });
   })
-  .then(function(r) { return r.json(); })
+  .then(function(r) { if (r) return r.json(); })
   .then(function(data) {
+    if (!data) return;
     if (data.error) { showAllocError(data.error); return; }
     _handleAffinityResult(data, date);
   })
-  .catch(function(e) { showAllocError('Affinity allocation failed: ' + e.message); });
+  .catch(function(e) { showAllocError('Zone allocation failed: ' + e.message); });
 }
 
-/** Shared result handler for both pincode and custom-region affinity allocation. */
+/** Shared result handler for affinity allocation. */
 function _handleAffinityResult(data, date) {
   var summary = data.allocationSummary;
   if (summary) {
