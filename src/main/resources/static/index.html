@@ -116,6 +116,31 @@ input:checked+.toggle-slider:before{transform:translateX(17px)}
 .sr-item-name{font-size:.83rem;font-weight:600;color:#212529}
 .sr-item-sub{font-size:.71rem;color:#6c757d;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sr-item-badge{background:#1976d2;color:#fff;border-radius:11px;padding:2px 7px;font-size:.7rem;font-weight:700;flex-shrink:0}
+/* ── Timeline dropdown ── */
+.sr-timeline{display:none;background:#f8f9fa;border:1px solid #e9ecef;border-radius:0 0 7px 7px;margin-top:-3px;margin-bottom:3px;padding:0;overflow:hidden;font-size:.74rem}
+.sr-timeline.open{display:block}
+.sr-timeline-header{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:#e3f2fd;border-bottom:1px solid #bbdefb;font-size:.76rem;font-weight:600;color:#0d47a1}
+.sr-timeline-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px 10px;border-bottom:1px solid #e9ecef}
+.sr-tl-stat{text-align:center;background:#fff;border-radius:4px;padding:4px 2px}
+.sr-tl-stat .v{font-size:.82rem;font-weight:700;color:#1565c0}
+.sr-tl-stat .l{font-size:.62rem;color:#6c757d;margin-top:1px}
+.sr-tl-stops{max-height:260px;overflow-y:auto;padding:4px 0}
+.sr-tl-stops::-webkit-scrollbar{width:4px}
+.sr-tl-stops::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:2px}
+.tl-row{display:flex;align-items:flex-start;gap:0;padding:0 10px}
+.tl-spine{display:flex;flex-direction:column;align-items:center;width:20px;flex-shrink:0;padding-top:2px}
+.tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2px currentColor}
+.tl-line{width:2px;flex:1;min-height:14px;background:#dee2e6}
+.tl-content{flex:1;padding:2px 0 8px 6px;min-width:0}
+.tl-time{font-size:.7rem;font-weight:700;color:#343a40;white-space:nowrap}
+.tl-label{font-size:.72rem;color:#495057;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-meta{font-size:.67rem;color:#6c757d;margin-top:1px}
+.tl-travel-badge{display:inline-block;background:#e3f2fd;color:#1565c0;border-radius:3px;padding:1px 4px;font-size:.65rem;font-weight:600;margin-right:3px}
+.tl-break-row{background:#fff8e1;border-left:3px solid #ffb300;margin:2px 10px;padding:4px 8px;border-radius:0 4px 4px 0;font-size:.7rem;color:#e65100;font-weight:600}
+.tl-loading{padding:12px 10px;text-align:center;color:#6c757d;font-size:.76rem}
+.tl-expand-btn{padding:2px 7px;font-size:.68rem;font-weight:600;border:1px solid #90caf9;border-radius:4px;background:#e3f2fd;color:#1565c0;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background .15s}
+.tl-expand-btn:hover{background:#bbdefb}
+.tl-expand-btn.open{background:#1976d2;color:#fff;border-color:#1976d2}
 .route-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px}
 .stop-list{max-height:260px;overflow-y:auto}
 .stop-list::-webkit-scrollbar{width:4px}
@@ -1633,11 +1658,21 @@ function renderSrList(srSummaries) {
       earningsSub = ' &nbsp;|&nbsp; Net: <strong style="color:#1b5e20">&#x20B9;' + sr.netEarnings.toFixed(2) + '</strong>';
     }
 
-    h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
+    var srId = 'sr-item-' + i;
+    var tlId = 'sr-tl-' + i;
+
+    // SR row — click on the row selects SR on map; expand button opens timeline
+    h += '<div id="' + srId + '" style="margin-bottom:0">';
+    h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" style="border-radius:7px 7px 0 0;margin-bottom:0" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
     h += '<div class="sr-dot" style="background:' + color + '"></div>';
     h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + (srAffinityMap[sr.srName] && srAffinityMap[sr.srName].length ? ' <span style="font-size:.65rem;color:#8e24aa;font-weight:400">(' + srAffinityMap[sr.srName].join(',') + ')</span>' : '') + '</div>';
     h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div></div>';
-    h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div></div>';
+    h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div>';
+    h += '<button class="tl-expand-btn" id="tl-btn-' + i + '" onclick="event.stopPropagation();toggleTimeline(\'' + esc(sr.srName) + '\',' + i + ')" title="View delivery timeline">⏱ Timeline</button>';
+    h += '</div>';
+    // Timeline dropdown (hidden by default)
+    h += '<div class="sr-timeline" id="' + tlId + '"><div class="tl-loading">Click ⏱ Timeline to load route schedule</div></div>';
+    h += '</div>';
   });
   list.innerHTML = h;
   // Re-append boundary legend entry after SR list rebuilds the legend
@@ -1690,14 +1725,48 @@ function addMarkersForSr(srName, route, color, index, date) {
   if (!route || !route.stops || !route.stops.length) return;
   if (!srLayers[srName]) srLayers[srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: index };
   var stops = route.stops.slice().sort(function(a, b) { return a.sequence - b.sequence; });
+
+  // ── Coordinate jitter for stacked markers ────────────────────────────────
+  // Multiple shipments often share the exact same lat/lng (same building/address).
+  // Without jitter they render as a single dot — only the top one is clickable.
+  // We offset duplicates in a tight spiral (~6m radius) so each is individually
+  // visible and clickable without misrepresenting the actual delivery location.
+  var coordCount = {}; // "lat,lng" → count of times seen so far
+  var JITTER_DEG = 0.00006; // ~6.7 metres at Pune latitude — tight enough to look clustered
+
   stops.forEach(function(stop) {
+    var key = stop.latitude.toFixed(6) + ',' + stop.longitude.toFixed(6);
+    var n = coordCount[key] || 0;
+    coordCount[key] = n + 1;
+
+    // Spiral offset: first occurrence stays at exact position; duplicates fan out
+    var lat = stop.latitude;
+    var lng = stop.longitude;
+    if (n > 0) {
+      // Arrange duplicates in a small circle around the original point
+      var angle = (n - 1) * (2 * Math.PI / 8); // up to 8 positions per circle
+      var radius = JITTER_DEG * (1 + Math.floor((n - 1) / 8)); // expand radius for >8 duplicates
+      lat = stop.latitude  + radius * Math.cos(angle);
+      lng = stop.longitude + radius * Math.sin(angle);
+    }
+
     var isOvr = stop.isOverride === true, isOor = stop.outOfRange === true;
     var icon = L.divIcon({
       className: '',
-      html: '<div style="width:13px;height:13px;background:' + color + ';' + (isOvr ? 'border:2px dashed #fff' : 'border:2px solid #fff') + ';' + (isOor ? 'outline:2px solid #e53935;outline-offset:1px;' : '') + 'border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.35)"></div>',
+      html: '<div style="width:13px;height:13px;background:' + color + ';'
+          + (isOvr ? 'border:2px dashed #fff' : 'border:2px solid #fff') + ';'
+          + (isOor ? 'outline:2px solid #e53935;outline-offset:1px;' : '')
+          + 'border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.35)"></div>',
       iconSize: [13,13], iconAnchor: [6,6]
     });
-    var marker = L.marker([stop.latitude, stop.longitude], { icon: icon, title: srName + ' #' + stop.sequence });
+    // Store original (true) coordinates on the marker for focusTimelineStop matching
+    var marker = L.marker([lat, lng], {
+      icon: icon,
+      title: srName + ' #' + stop.sequence,
+      // Keep original coords for popup accuracy and timeline click matching
+      origLat: stop.latitude,
+      origLng: stop.longitude
+    });
     marker.bindPopup(buildPopup(srName, stop, color, date), { maxWidth: 230 });
     marker.addTo(map);
     srLayers[srName].markers.push(marker);
@@ -1764,6 +1833,202 @@ function compareRoutes() {
     if (layer.googlePolyline) layer.googlePolyline.addTo(map);
   });
   showAllocInfo('Comparison mode: solid lines = OSM, dashed green lines = Google Maps');
+}
+
+// ── SR TIMELINE ───────────────────────────────────────────────────────────────
+
+/**
+ * Toggle the delivery timeline dropdown for an SR.
+ * First open: fetches from /api/allocate/{date}/sr/{srName}/timeline
+ * Subsequent opens: uses cached data.
+ */
+var timelineCache = {}; // { srName: timelineData }
+
+function toggleTimeline(srName, index) {
+  var tlEl  = document.getElementById('sr-tl-' + index);
+  var btnEl = document.getElementById('tl-btn-' + index);
+  if (!tlEl) return;
+
+  var isOpen = tlEl.classList.contains('open');
+
+  if (isOpen) {
+    // Close
+    tlEl.classList.remove('open');
+    if (btnEl) { btnEl.classList.remove('open'); btnEl.textContent = '⏱ Timeline'; }
+    return;
+  }
+
+  // Open
+  tlEl.classList.add('open');
+  if (btnEl) { btnEl.classList.add('open'); btnEl.textContent = '▲ Timeline'; }
+
+  // Use cache if available
+  if (timelineCache[srName]) {
+    renderTimeline(tlEl, timelineCache[srName], srName);
+    return;
+  }
+
+  // Show loading
+  tlEl.innerHTML = '<div class="tl-loading"><span class="spinner"></span> Calculating route timeline…</div>';
+
+  var date = document.getElementById('date-select').value;
+  if (!date) { tlEl.innerHTML = '<div class="tl-loading" style="color:#c62828">Select a date first.</div>'; return; }
+
+  fetch('/api/allocate/' + encodeURIComponent(date) + '/sr/' + encodeURIComponent(srName) + '/timeline')
+    .then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw new Error(e.message || 'Failed'); }); })
+    .then(function(data) {
+      timelineCache[srName] = data;
+      renderTimeline(tlEl, data, srName);
+    })
+    .catch(function(e) {
+      tlEl.innerHTML = '<div class="tl-loading" style="color:#c62828">⚠️ ' + esc(e.message) + '</div>';
+    });
+}
+
+function renderTimeline(container, data, srName) {
+  if (!data || !data.stops || data.stops.length === 0) {
+    container.innerHTML = '<div class="tl-loading">No stops assigned to this SR.</div>';
+    return;
+  }
+
+  var totalH = Math.floor(data.totalDurationMinutes / 60);
+  var totalM = Math.round(data.totalDurationMinutes % 60);
+  var durationStr = totalH > 0 ? totalH + 'h ' + totalM + 'm' : totalM + 'm';
+
+  var h = '';
+
+  // Header
+  h += '<div class="sr-timeline-header">';
+  h += '<span>🕐 ' + esc(srName) + ' — Delivery Timeline</span>';
+  h += '<span style="font-weight:400;font-size:.7rem">' + esc(data.startTime) + ' → ' + esc(data.endTime) + '</span>';
+  h += '</div>';
+
+  // Stats row
+  h += '<div class="sr-timeline-stats">';
+  h += '<div class="sr-tl-stat"><div class="v">' + durationStr + '</div><div class="l">Total Duration</div></div>';
+  h += '<div class="sr-tl-stat"><div class="v">' + Math.round(data.travelMinutes) + 'm</div><div class="l">Travel Time</div></div>';
+  h += '<div class="sr-tl-stat"><div class="v">' + Math.round(data.deliveryMinutes) + 'm</div><div class="l">Delivery Time</div></div>';
+  h += '<div class="sr-tl-stat"><div class="v">' + data.stopCount + '</div><div class="l">Stops</div></div>';
+  h += '</div>';
+
+  // Timeline stops
+  h += '<div class="sr-tl-stops">';
+
+  // Hub start
+  h += '<div class="tl-row">';
+  h += '<div class="tl-spine"><div class="tl-dot" style="color:#e53935;background:#e53935"></div><div class="tl-line"></div></div>';
+  h += '<div class="tl-content"><div class="tl-time">' + esc(data.startTime) + '</div>';
+  h += '<div class="tl-label" style="font-weight:600;color:#e53935">🏢 Hub — Departure</div></div></div>';
+
+  var breakAfter = data.breakAfterStop || Math.floor(data.stops.length / 2);
+
+  data.stops.forEach(function(stop, idx) {
+    var travelRounded = Math.round(stop.travelFromPrevMin);
+    var distKm = stop.distFromPrevKm || 0;
+    var distStr = distKm >= 0.1 ? distKm.toFixed(2) + ' km' : (distKm * 1000).toFixed(0) + ' m';
+    var isHeavy = stop.isHeavy;
+    // Highlight 0-min legs (very close stops) with a different colour
+    var travelColor = travelRounded === 0 ? '#ff6f00' : '#1565c0';
+    var travelBg    = travelRounded === 0 ? '#fff3e0' : '#e3f2fd';
+
+    // Travel leg indicator — shows time AND distance
+    h += '<div class="tl-row">';
+    h += '<div class="tl-spine"><div class="tl-line" style="min-height:18px"></div></div>';
+    h += '<div class="tl-content" style="padding-bottom:2px">';
+    h += '<span class="tl-travel-badge" style="background:' + travelBg + ';color:' + travelColor + '">';
+    h += '🚗 ' + travelRounded + ' min';
+    h += ' &nbsp;·&nbsp; 📍 ' + distStr;
+    if (travelRounded === 0 && distKm < 0.1) {
+      h += ' <span title="Very close stops — same cluster">⚠️</span>';
+    }
+    h += '</span>';
+    h += '</div></div>';
+
+    // Stop dot + content — CLICKABLE to focus map
+    h += '<div class="tl-row" style="cursor:pointer" onclick="focusTimelineStop(' + stop.lat + ',' + stop.lng + ',\'' + esc(stop.shippingId) + '\',\'' + esc(srName) + '\')" title="Click to focus on map">';
+    h += '<div class="tl-spine"><div class="tl-dot" style="color:#1976d2;background:#1976d2"></div><div class="tl-line"></div></div>';
+    h += '<div class="tl-content">';
+    h += '<div class="tl-time">' + esc(stop.arrivalTime) + ' → ' + esc(stop.departureTime) + '</div>';
+    h += '<div class="tl-label">Stop #' + stop.sequence + ' &nbsp;·&nbsp; ' + esc(stop.pincode || '') + (isHeavy ? ' <span style="color:#6a1b9a;font-size:.65rem">⬛ Heavy</span>' : '') + ' <span style="font-size:.65rem;color:#1976d2">🗺 view</span></div>';
+    h += '<div class="tl-meta">📦 ' + esc(stop.shippingId || '') + ' &nbsp;·&nbsp; ' + stop.deliveryMin + ' min handling</div>';
+    h += '</div></div>';
+
+    // Break buffer after midpoint
+    if (idx + 1 === breakAfter) {
+      h += '<div class="tl-break-row">☕ 30-min break buffer</div>';
+    }
+  });
+
+  // Return to hub — with distance
+  var retDist = data.returnToHub.distKm || 0;
+  var retDistStr = retDist >= 0.1 ? retDist.toFixed(2) + ' km' : (retDist * 1000).toFixed(0) + ' m';
+  var retMin = Math.round(data.returnToHub.travelMin);
+
+  h += '<div class="tl-row">';
+  h += '<div class="tl-spine"><div class="tl-line" style="min-height:18px"></div></div>';
+  h += '<div class="tl-content" style="padding-bottom:2px">';
+  h += '<span class="tl-travel-badge">🚗 ' + retMin + ' min &nbsp;·&nbsp; 📍 ' + retDistStr + '</span>';
+  h += '</div></div>';
+
+  h += '<div class="tl-row">';
+  h += '<div class="tl-spine"><div class="tl-dot" style="color:#e53935;background:#e53935"></div></div>';
+  h += '<div class="tl-content"><div class="tl-time">' + esc(data.returnToHub.arrivalTime) + '</div>';
+  h += '<div class="tl-label" style="font-weight:600;color:#e53935">🏢 Hub — Return</div></div></div>';
+
+  h += '</div>'; // sr-tl-stops
+
+  container.innerHTML = h;
+}
+
+/**
+ * Focus the map on a specific stop from the timeline.
+ * Pans + zooms to the stop coordinates and opens its popup if available.
+ */
+function focusTimelineStop(lat, lng, shippingId, srName) {
+  // Switch to Leaflet if on Google Maps (Leaflet has the markers)
+  if (activeMapProvider === 'google') {
+    // Pan Google Maps to the stop
+    if (gmap) {
+      gmap.panTo({ lat: lat, lng: lng });
+      gmap.setZoom(17);
+    }
+    return;
+  }
+
+  // Leaflet: zoom to the stop
+  map.setView([lat, lng], 17, { animate: true });
+
+  // Find the marker for this stop and open its popup.
+  // Match on origLat/origLng (true coordinates) because the display position
+  // may be jittered slightly for stacked markers.
+  var layer = srLayers[srName];
+  if (layer && layer.markers) {
+    var matched = null;
+    for (var i = 0; i < layer.markers.length; i++) {
+      var m = layer.markers[i];
+      var oLat = m.options.origLat !== undefined ? m.options.origLat : m.getLatLng().lat;
+      var oLng = m.options.origLng !== undefined ? m.options.origLng : m.getLatLng().lng;
+      if (Math.abs(oLat - lat) < 0.0001 && Math.abs(oLng - lng) < 0.0001) {
+        // Among all markers at this location, prefer the one whose title matches shippingId
+        if (!matched || m.options.title.indexOf(shippingId) >= 0) {
+          matched = m;
+        }
+        if (m.options.title.indexOf(shippingId) >= 0) break; // exact match — stop searching
+      }
+    }
+    if (matched) {
+      // Pan to the jittered display position so the marker is centred
+      map.setView(matched.getLatLng(), 17, { animate: true });
+      matched.openPopup();
+      // Pulse highlight
+      var el = matched.getElement();
+      if (el) {
+        el.style.transition = 'transform 0.2s';
+        el.style.transform = 'scale(2.2)';
+        setTimeout(function(e) { e.style.transform = 'scale(1)'; }.bind(null, el), 450);
+      }
+    }
+  }
 }
 
 // ── SR SELECTION ──────────────────────────────────────────────────────────────
@@ -1940,6 +2205,7 @@ function clearPolylinesByMode(mode) {
 
 function clearAllocationUI() {
   clearMarkers();
+  timelineCache = {}; // clear timeline cache on new allocation
   document.getElementById('summary-panel').classList.add('hidden');
   document.getElementById('sr-list-panel').classList.add('hidden');
   document.getElementById('route-panel').classList.add('hidden');
@@ -3146,7 +3412,7 @@ function lmPushAll() {
         srName: sr.srName,
         deliveryUserId: m.deliveryUserId,
         deliveryUserName: m.deliveryUserName || m.deliveryUserId,
-        empType: m.empType || 'ownsr'
+      empType: m.empType || 'ownsr'
       });
     }
   });

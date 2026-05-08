@@ -32,6 +32,109 @@ public class GoogleMapsService {
     }
 
     /**
+     * Get per-leg travel durations (minutes) for a sequence of waypoints.
+     * Returns one duration per leg: [hub→stop1, stop1→stop2, ..., stopN→hub].
+     * Falls back to Haversine-based estimate (20 km/h) if API unavailable.
+     *
+     * @param originLat  hub latitude
+     * @param originLng  hub longitude
+     * @param waypoints  ordered list of [lat, lng] pairs (already sequenced)
+     * @return list of travel durations in minutes, size = waypoints.size() + 1 (includes return leg)
+     */
+    public List<Double> getLegDurationsMinutes(double originLat, double originLng,
+                                                List<double[]> waypoints) {
+        List<Double> durations = new ArrayList<>();
+        if (waypoints.isEmpty()) return durations;
+
+        if (!isApiKeyConfigured()) {
+            return fallbackLegDurations(originLat, originLng, waypoints);
+        }
+
+        try {
+            // Build a route with the waypoints in the given order (no optimization)
+            String origin = originLat + "," + originLng;
+
+            // Google Directions API: max 25 waypoints
+            List<double[]> limited = waypoints.size() > 23 ? waypoints.subList(0, 23) : waypoints;
+
+            StringBuilder waypointStr = new StringBuilder();
+            for (int i = 0; i < limited.size() - 1; i++) {
+                if (waypointStr.length() > 0) waypointStr.append("|");
+                waypointStr.append(limited.get(i)[0]).append(",").append(limited.get(i)[1]);
+            }
+
+            String destination = limited.get(limited.size() - 1)[0] + "," + limited.get(limited.size() - 1)[1];
+
+            String url = "https://maps.googleapis.com/maps/api/directions/json"
+                    + "?origin=" + URLEncoder.encode(origin, StandardCharsets.UTF_8)
+                    + "&destination=" + URLEncoder.encode(destination, StandardCharsets.UTF_8)
+                    + (waypointStr.length() > 0
+                        ? "&waypoints=" + URLEncoder.encode(waypointStr.toString(), StandardCharsets.UTF_8)
+                        : "")
+                    + "&key=" + apiKey;
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            JsonNode root = objectMapper.readTree(response.body());
+
+            if (!"OK".equals(root.path("status").asText())) {
+                log.warn("Google Directions API (legs) error: {}", root.path("status").asText());
+                return fallbackLegDurations(originLat, originLng, waypoints);
+            }
+
+            JsonNode legs = root.path("routes").get(0).path("legs");
+            for (JsonNode leg : legs) {
+                durations.add(leg.path("duration").path("value").asDouble() / 60.0);
+            }
+
+            // Add return leg: last stop → hub
+            String lastStop = limited.get(limited.size() - 1)[0] + "," + limited.get(limited.size() - 1)[1];
+            String returnUrl = "https://maps.googleapis.com/maps/api/directions/json"
+                    + "?origin=" + URLEncoder.encode(lastStop, StandardCharsets.UTF_8)
+                    + "&destination=" + URLEncoder.encode(origin, StandardCharsets.UTF_8)
+                    + "&key=" + apiKey;
+
+            HttpRequest returnReq = HttpRequest.newBuilder().uri(URI.create(returnUrl)).GET().build();
+            HttpResponse<String> returnResp = httpClient.send(returnReq, HttpResponse.BodyHandlers.ofString());
+            JsonNode returnRoot = objectMapper.readTree(returnResp.body());
+            if ("OK".equals(returnRoot.path("status").asText())) {
+                JsonNode returnLegs = returnRoot.path("routes").get(0).path("legs");
+                double returnDur = 0;
+                for (JsonNode leg : returnLegs) returnDur += leg.path("duration").path("value").asDouble() / 60.0;
+                durations.add(returnDur);
+            } else {
+                // Fallback for return leg
+                double[] last = limited.get(limited.size() - 1);
+                durations.add(haversine(last[0], last[1], originLat, originLng) / 20.0 * 60.0);
+            }
+
+            return durations;
+
+        } catch (Exception e) {
+            log.warn("Error getting leg durations from Google Maps: {}", e.getMessage());
+            return fallbackLegDurations(originLat, originLng, waypoints);
+        }
+    }
+
+    /** Fallback leg durations using Haversine + 20 km/h city speed. */
+    private List<Double> fallbackLegDurations(double originLat, double originLng, List<double[]> waypoints) {
+        List<Double> durations = new ArrayList<>();
+        double prevLat = originLat, prevLng = originLng;
+        for (double[] wp : waypoints) {
+            double distKm = haversine(prevLat, prevLng, wp[0], wp[1]);
+            durations.add(distKm / 20.0 * 60.0); // 20 km/h city speed
+            prevLat = wp[0]; prevLng = wp[1];
+        }
+        // Return to hub
+        durations.add(haversine(prevLat, prevLng, originLat, originLng) / 20.0 * 60.0);
+        return durations;
+    }
+
+    /**
      * Get directions from origin through waypoints.
      * Uses Google Directions API with waypoint optimization.
      *
