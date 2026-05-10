@@ -53,6 +53,7 @@ public class AllocationEngineService {
     private final ScoreWeights scoreWeights;
     private final HubBoundaryService hubBoundaryService;
     private final PincodeBoundaryService pincodeBoundaryService;
+    private final AffinityShiftAllocationService affinityShiftAllocationService;
 
     @Value("${hub.name:PNQ HDP}")
     private String hubName;
@@ -100,6 +101,16 @@ public class AllocationEngineService {
 
     @org.springframework.transaction.annotation.Transactional
     public AllocationSummary allocate(LocalDate date) {
+        return allocate(date, new AllocateRequest(date.toString(), null));
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public AllocationSummary allocate(LocalDate date, AllocateRequest request) {
+        // ── Mode branch: delegate to time-based pipeline if requested ─────────
+        if (request != null && "time-based".equals(request.allocationMode())) {
+            return affinityShiftAllocationService.allocate(date, request);
+        }
+
         String dateStr = formatDate(date);
         log.info("AllocationEngineService: starting allocation for '{}'", dateStr);
 

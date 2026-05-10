@@ -195,6 +195,16 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .map-fullscreen #map-container{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999}
 .map-fullscreen #header{display:none!important}
 .map-fullscreen #fullscreen-btn{top:10px;right:10px}
+/* Affinity status badges */
+.affinity-badge{display:inline-block;border-radius:10px;padding:1px 7px;font-size:.67rem;font-weight:700;flex-shrink:0;white-space:nowrap}
+.affinity-badge.assigned{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
+.affinity-badge.non-affinity{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
+/* Shift utilisation progress bar */
+.util-bar-wrap{flex:1;background:#e9ecef;border-radius:4px;height:7px;overflow:hidden;min-width:40px}
+.util-bar{height:100%;border-radius:4px;transition:width .3s}
+.util-bar.low{background:#43a047}
+.util-bar.mid{background:#fb8c00}
+.util-bar.high{background:#e53935}
 /* LM Integration */
 .lm-sr-row{display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.78rem}
 .lm-sr-row:last-child{border-bottom:none}
@@ -203,6 +213,33 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .lm-sr-count{font-size:.7rem;color:#6c757d;min-width:25px;flex-shrink:0}
 .lm-sr-input{flex:1;padding:3px 5px;border:1px solid #ced4da;border-radius:4px;font-size:.74rem;min-width:0}
 .lm-sr-status{width:16px;height:16px;flex-shrink:0;text-align:center;font-size:.7rem}
+/* Region Health Panel */
+.region-card{border-radius:8px;padding:10px 12px;margin-bottom:8px;border:1px solid #e9ecef;background:#fff}
+.region-card.healthy{border-left:4px solid #43a047}
+.region-card.overflow{border-left:4px solid #e53935}
+.region-card.idle-srs{border-left:4px solid #fb8c00}
+.region-card.underloaded{border-left:4px solid #1976d2}
+.region-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.region-card-name{font-size:.84rem;font-weight:700;color:#212529}
+.region-status-badge{border-radius:10px;padding:2px 8px;font-size:.68rem;font-weight:700;white-space:nowrap}
+.region-status-badge.healthy{background:#e8f5e9;color:#2e7d32}
+.region-status-badge.overflow{background:#ffebee;color:#c62828}
+.region-status-badge.idle-srs{background:#fff3e0;color:#e65100}
+.region-status-badge.underloaded{background:#e3f2fd;color:#1565c0}
+.region-stats-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:.74rem}
+.region-stat{text-align:center;background:#f8f9fa;border-radius:5px;padding:4px 8px;min-width:50px}
+.region-stat .v{font-size:.88rem;font-weight:700;color:#1565c0}
+.region-stat .l{font-size:.65rem;color:#6c757d;margin-top:1px}
+.region-sr-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.sr-chip{border-radius:10px;padding:2px 7px;font-size:.68rem;font-weight:600;white-space:nowrap}
+.sr-chip.active{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
+.sr-chip.idle{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
+.suggestion-card{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:7px 10px;margin-top:6px;font-size:.74rem}
+.suggestion-card.high{background:#ffebee;border-color:#ef9a9a}
+.suggestion-card.medium{background:#fff3e0;border-color:#ffcc80}
+.suggestion-card.low{background:#e3f2fd;border-color:#90caf9}
+.suggestion-header{font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.suggestion-action{color:#495057;line-height:1.4}
   </style>
 </head>
 <body>
@@ -284,6 +321,37 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <span class="badge" id="affinity-match-badge" style="background:#8e24aa">0 drawn</span>
       </div>
 
+      <!-- Allocation Mode Toggle (9.1) -->
+      <div style="display:flex;gap:4px;margin-bottom:10px;background:#f8f9fa;border-radius:6px;padding:3px" id="allocation-mode-toggle">
+        <button class="btn" id="mode-count-btn"
+                onclick="setAllocationMode('count-based')"
+                style="flex:1;padding:5px 8px;font-size:.76rem">
+          📊 Count-Based
+        </button>
+        <button class="btn" id="mode-timebased-btn"
+                onclick="setAllocationMode('time-based')"
+                style="flex:1;padding:5px 8px;font-size:.76rem">
+          ⏱ Time-Based Config
+        </button>
+      </div>
+
+      <!-- Shift duration indicator (shown in time-based mode) (9.4) -->
+      <div id="shift-duration-indicator" style="display:none;background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:.78rem;color:#0d47a1;font-weight:600;text-align:center">
+        ⏱ <span id="shift-duration-label">8 h shift</span>
+      </div>
+
+      <!-- srCapacityMin / srCapacityMax inputs (shown in count-based mode) (9.5) -->
+      <div id="capacity-inputs" style="display:none;margin-bottom:8px">
+        <div style="display:flex;gap:6px;align-items:center">
+          <label style="font-size:.76rem;font-weight:600;color:#343a40;white-space:nowrap">Cap Min:</label>
+          <input type="number" id="srCapacityMin" min="1" max="200" value="20"
+                 style="width:60px;padding:4px 6px;border:1px solid #ced4da;border-radius:4px;font-size:.8rem"/>
+          <label style="font-size:.76rem;font-weight:600;color:#343a40;white-space:nowrap">Max:</label>
+          <input type="number" id="srCapacityMax" min="1" max="200" value="40"
+                 style="width:60px;padding:4px 6px;border:1px solid #ced4da;border-radius:4px;font-size:.8rem"/>
+        </div>
+      </div>
+
       <!-- Draw Region mode only (pincode mode removed per user request) -->
       <div id="affinity-draw-mode">
         <div style="font-size:.74rem;color:#6c757d;margin-bottom:8px">
@@ -345,6 +413,18 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div class="panel hidden" id="sr-list-panel">
       <div class="panel-title">Service Representatives</div>
       <div id="sr-list"></div>
+    </div>
+
+    <!-- Region Health Panel (time-based mode only) -->
+    <div class="panel hidden" id="region-health-panel">
+      <div class="panel-title" style="cursor:pointer" onclick="toggleRegionHealthPanel()">
+        🗺 Region Health
+        <span id="region-health-badge" style="font-size:.7rem;border-radius:10px;padding:2px 8px;font-weight:600;background:#e9ecef;color:#495057"></span>
+        <span id="region-health-arrow" style="font-size:.7rem;margin-left:auto">▼</span>
+      </div>
+      <div id="region-health-body">
+        <div id="region-health-list"></div>
+      </div>
     </div>
 
     <!-- Route Details -->
@@ -431,6 +511,25 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
     <div id="map-legend">
       <h4 onclick="this.parentElement.classList.toggle('collapsed')">Legend <span class="legend-toggle">▼</span></h4>
       <div id="legend-items"></div>
+    </div>
+
+    <!-- Density markers toggle — bottom-right, above raw plot -->
+    <div id="density-toggle-btn"
+         onclick="toggleDensityMarkers()"
+         title="Show/hide shipment density markers (clustered dots with numbers)"
+         style="position:absolute;bottom:100px;right:12px;z-index:10001;
+                background:#fff;border:2px solid rgba(0,0,0,.2);border-radius:6px;
+                padding:6px 10px;cursor:pointer;font-size:.75rem;font-weight:600;
+                box-shadow:0 2px 6px rgba(0,0,0,.18);display:flex;align-items:center;gap:6px;
+                user-select:none;line-height:1.3">
+      <span id="density-toggle-icon" style="font-size:.9rem">🔴🔵</span>
+      <span id="density-toggle-label">Density ON</span>
+      <span id="density-toggle-indicator"
+            style="width:28px;height:14px;border-radius:7px;background:#43a047;
+                   display:inline-flex;align-items:center;padding:0 2px;transition:background .2s;flex-shrink:0">
+        <span style="width:10px;height:10px;border-radius:50%;background:#fff;
+                     margin-left:auto;transition:margin .2s;display:block"></span>
+      </span>
     </div>
 
     <!-- Shipment display toggle — bottom-right -->
@@ -1460,6 +1559,9 @@ function renderAttendance(attendees) {
       var sr = sel.getAttribute('data-sr-zone');
       if (srZoneMap[sr]) sel.value = srZoneMap[sr];
     });
+    // Show the save row when zones exist (so user knows to save after assigning)
+    var saveRow = document.getElementById('sr-zone-save-row');
+    if (saveRow) saveRow.style.display = 'block';
   }
 }
 
@@ -1528,14 +1630,20 @@ function runAllocation(mode) {
   fetch('/api/allocate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date: date })
+    // 9.3: include allocationMode in the request body
+    body: JSON.stringify({ date: date, allocationMode: getAllocationMode() })
   })
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
   .then(function(res) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     if (!res.ok) {
-      showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
+      // 9.9: mode-aware error message
+      if (getAllocationMode() === 'time-based') {
+        showAllocError('Allocation failed. Please check your affinity configuration. (' + res.status + ')');
+      } else {
+        showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
+      }
       return;
     }
     lastAllocationMode = mode;
@@ -1551,6 +1659,7 @@ function runAllocation(mode) {
     document.getElementById('summary-mode-badge').textContent = label;
     renderSummary(res.data);
     renderSrList(res.data.srSummaries);
+    renderRegionHealth(res.data);
     lmShowPanel(res.data.srSummaries);
     renderAllSrsOnMap(res.data.srSummaries, date, mode);
     showAllocInfo('Allocation complete using ' + label + '. ' + (mode === 'osm' && googleMapsConfigured ? 'You can also run Google Maps allocation to compare.' : ''));
@@ -1558,13 +1667,23 @@ function runAllocation(mode) {
   .catch(function(e) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
-    showAllocError('Network error: ' + e.message);
+    // 9.9: mode-aware error message
+    if (getAllocationMode() === 'time-based') {
+      showAllocError('Allocation failed. Please check your affinity configuration.');
+    } else {
+      showAllocError('Network error: ' + e.message);
+    }
   });
 }
 
 function renderSummary(s) {
   document.getElementById('summary-panel').classList.remove('hidden');
   var us = s.unallocatedShipments || 0;
+
+  // Update shift duration label if time-based response (9.4)
+  if (s.shiftDurationMinutes != null) {
+    updateShiftDurationLabel(s.shiftDurationMinutes);
+  }
 
   // ── Core allocation stats ──────────────────────────────────────────────────
   var coreHtml =
@@ -1646,6 +1765,31 @@ function renderSrList(srSummaries) {
   if (hasGoogleAllocation || lastAllocationMode === 'google') {
     legendItems.innerHTML += '<div class="legend-item"><div style="width:22px;height:3px;background:repeating-linear-gradient(90deg,#555 0,#555 4px,transparent 4px,transparent 8px)"></div><span style="color:#555">Google Maps route (dashed, same color)</span></div>';
   }
+
+  // Detect if this is a time-based result (9.6, 9.7, 9.8)
+  var isTimeBased = srSummaries.length > 0 && srSummaries.some(function(sr) {
+    return sr.shiftUtilisationPct != null || sr.affinityStatus != null;
+  });
+
+  // 9.8: summary line for time-based mode
+  if (isTimeBased) {
+    var activeSrs = srSummaries.filter(function(sr) { return (sr.shiftUtilisationPct || 0) > 0; }).length;
+    var zeroSrs   = srSummaries.length - activeSrs;
+    var summaryDiv = document.getElementById('time-based-sr-summary');
+    if (!summaryDiv) {
+      summaryDiv = document.createElement('div');
+      summaryDiv.id = 'time-based-sr-summary';
+      summaryDiv.style.cssText = 'margin-bottom:8px;padding:7px 10px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;font-size:.76rem;color:#1b5e20;font-weight:600';
+      list.parentNode.insertBefore(summaryDiv, list);
+    }
+    summaryDiv.innerHTML = '⏱ Time-Based: <strong>' + activeSrs + '</strong> active SR' + (activeSrs !== 1 ? 's' : '') +
+      ' (utilisation &gt; 0%) &nbsp;·&nbsp; <strong>' + zeroSrs + '</strong> zero-utilisation';
+    summaryDiv.style.display = 'block';
+  } else {
+    var existing = document.getElementById('time-based-sr-summary');
+    if (existing) existing.style.display = 'none';
+  }
+
   var h = '';
   srSummaries.forEach(function(sr, i) {
     var color = SR_COLORS[i % SR_COLORS.length];
@@ -1658,6 +1802,26 @@ function renderSrList(srSummaries) {
       earningsSub = ' &nbsp;|&nbsp; Net: <strong style="color:#1b5e20">&#x20B9;' + sr.netEarnings.toFixed(2) + '</strong>';
     }
 
+    // 9.6: shift utilisation progress bar (time-based mode)
+    var utilisationHtml = '';
+    if (isTimeBased && sr.shiftUtilisationPct != null) {
+      var pct = Math.min(100, Math.max(0, sr.shiftUtilisationPct));
+      var barClass = pct >= 90 ? 'high' : (pct >= 60 ? 'mid' : 'low');
+      utilisationHtml =
+        '<div style="display:flex;align-items:center;gap:5px;margin-top:3px">' +
+          '<div class="util-bar-wrap"><div class="util-bar ' + barClass + '" style="width:' + pct.toFixed(1) + '%"></div></div>' +
+          '<span style="font-size:.68rem;color:#495057;white-space:nowrap;min-width:36px">' + pct.toFixed(1) + '%</span>' +
+        '</div>';
+    }
+
+    // 9.7: affinity status badge (time-based mode)
+    var affinityBadgeHtml = '';
+    if (isTimeBased && sr.affinityStatus != null) {
+      var isAssigned = sr.affinityStatus === 'AFFINITY_ASSIGNED';
+      affinityBadgeHtml = '<span class="affinity-badge ' + (isAssigned ? 'assigned' : 'non-affinity') + '">' +
+        (isAssigned ? '✅ Affinity' : '➖ Non-Affinity') + '</span>';
+    }
+
     var srId = 'sr-item-' + i;
     var tlId = 'sr-tl-' + i;
 
@@ -1665,8 +1829,15 @@ function renderSrList(srSummaries) {
     h += '<div id="' + srId + '" style="margin-bottom:0">';
     h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" style="border-radius:7px 7px 0 0;margin-bottom:0" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
     h += '<div class="sr-dot" style="background:' + color + '"></div>';
-    h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + (srAffinityMap[sr.srName] && srAffinityMap[sr.srName].length ? ' <span style="font-size:.65rem;color:#8e24aa;font-weight:400">(' + srAffinityMap[sr.srName].join(',') + ')</span>' : '') + '</div>';
-    h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div></div>';
+    h += '<div class="sr-item-info">';
+    h += '<div class="sr-item-name" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">' +
+         esc(sr.srName) +
+         (srAffinityMap[sr.srName] && srAffinityMap[sr.srName].length ? ' <span style="font-size:.65rem;color:#8e24aa;font-weight:400">(' + srAffinityMap[sr.srName].join(',') + ')</span>' : '') +
+         (affinityBadgeHtml ? ' ' + affinityBadgeHtml : '') +
+         '</div>';
+    h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div>';
+    h += utilisationHtml;
+    h += '</div>';
     h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div>';
     h += '<button class="tl-expand-btn" id="tl-btn-' + i + '" onclick="event.stopPropagation();toggleTimeline(\'' + esc(sr.srName) + '\',' + i + ')" title="View delivery timeline">⏱ Timeline</button>';
     h += '</div>';
@@ -2210,6 +2381,7 @@ function clearAllocationUI() {
   document.getElementById('sr-list-panel').classList.add('hidden');
   document.getElementById('route-panel').classList.add('hidden');
   document.getElementById('lm-panel').classList.add('hidden');
+  document.getElementById('region-health-panel').classList.add('hidden');
   document.getElementById('compare-banner').style.display = 'none';
   document.getElementById('legend-items').innerHTML =
     '<div class="legend-item"><div class="legend-dot" style="background:#e53935"></div>Hub</div>';
@@ -2219,10 +2391,237 @@ function clearAllocationUI() {
   }
 }
 
+// ── REGION HEALTH PANEL ───────────────────────────────────────────────────────
+
+function toggleRegionHealthPanel() {
+  var body = document.getElementById('region-health-body');
+  var arrow = document.getElementById('region-health-arrow');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    if (arrow) arrow.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    if (arrow) arrow.textContent = '▶';
+  }
+}
+
+/**
+ * Render the Region Health panel from the AllocationSummary response.
+ * Shows per-region stats, health status, and SR rebalancing suggestions.
+ */
+function renderRegionHealth(summary) {
+  var panel = document.getElementById('region-health-panel');
+  var list  = document.getElementById('region-health-list');
+  var badge = document.getElementById('region-health-badge');
+
+  // Only show in time-based mode with region summaries
+  if (!summary || summary.allocationMode !== 'time-based' || !summary.regionSummaries || !summary.regionSummaries.length) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  panel.classList.remove('hidden');
+
+  var regions = summary.regionSummaries;
+  var overflowCount = regions.filter(function(r) { return r.healthStatus === 'OVERFLOW'; }).length;
+  var idleCount     = regions.filter(function(r) { return r.healthStatus === 'IDLE_SRS'; }).length;
+  var healthyCount  = regions.filter(function(r) { return r.healthStatus === 'HEALTHY'; }).length;
+
+  // Badge summary
+  if (overflowCount > 0) {
+    badge.textContent = overflowCount + ' overflow';
+    badge.style.background = '#ffebee'; badge.style.color = '#c62828';
+  } else if (idleCount > 0) {
+    badge.textContent = idleCount + ' idle SRs';
+    badge.style.background = '#fff3e0'; badge.style.color = '#e65100';
+  } else {
+    badge.textContent = healthyCount + ' healthy';
+    badge.style.background = '#e8f5e9'; badge.style.color = '#2e7d32';
+  }
+
+  var h = '';
+
+  // Global suggestion summary if there are any suggestions
+  var allSuggestions = [];
+  regions.forEach(function(r) { if (r.suggestions) allSuggestions = allSuggestions.concat(r.suggestions); });
+  lastRegionSuggestions = allSuggestions;
+  if (allSuggestions.length > 0) {
+    h += '<div style="background:#fff3e0;border:1px solid #ffe082;border-radius:7px;padding:9px 11px;margin-bottom:10px">';
+    h += '<div style="font-size:.78rem;font-weight:700;color:#e65100;margin-bottom:5px">💡 ' + allSuggestions.length + ' Rebalancing Suggestion' + (allSuggestions.length > 1 ? 's' : '') + '</div>';
+    allSuggestions.forEach(function(s) {
+      var priorityColor = s.priority === 'HIGH' ? '#c62828' : (s.priority === 'MEDIUM' ? '#e65100' : '#1565c0');
+      h += '<div style="font-size:.73rem;padding:4px 0;border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:flex-start;gap:6px">';
+      h += '<span style="background:' + priorityColor + ';color:#fff;border-radius:4px;padding:1px 5px;font-size:.65rem;font-weight:700;flex-shrink:0;margin-top:1px">' + esc(s.priority) + '</span>';
+      h += '<span style="color:#495057">' + esc(s.reason) + '</span>';
+      h += '</div>';
+    });
+    h += '</div>';
+    h += '<div style="margin-top:6px"><button class="btn btn-primary" style="font-size:.74rem;width:100%" onclick="autoReassignSrs()">🔄 Auto Reassign Idle SRs to Overflow Regions</button></div>';
+  }
+
+  // Per-region cards
+  regions.forEach(function(region) {
+    var statusClass = region.healthStatus ? region.healthStatus.toLowerCase().replace('_', '-') : 'healthy';
+    var statusLabel = {
+      'HEALTHY': '✅ Healthy',
+      'OVERFLOW': '🔴 Overflow',
+      'IDLE_SRS': '⚠️ Idle SRs',
+      'UNDERLOADED': '🔵 Underloaded'
+    }[region.healthStatus] || region.healthStatus;
+
+    h += '<div class="region-card ' + statusClass + '">';
+
+    // Header
+    h += '<div class="region-card-header">';
+    h += '<span class="region-card-name">🗺 ' + esc(region.regionName) + '</span>';
+    h += '<span class="region-status-badge ' + statusClass + '">' + statusLabel + '</span>';
+    h += '</div>';
+
+    // Stats row
+    h += '<div class="region-stats-row">';
+    h += '<div class="region-stat"><div class="v">' + region.totalShipmentsInRegion + '</div><div class="l">Total</div></div>';
+    h += '<div class="region-stat"><div class="v" style="color:#2e7d32">' + region.allocatedShipments + '</div><div class="l">Allocated</div></div>';
+    if (region.overflowShipments > 0) {
+      h += '<div class="region-stat"><div class="v" style="color:#c62828">' + region.overflowShipments + '</div><div class="l">Overflow</div></div>';
+    }
+    h += '<div class="region-stat"><div class="v">' + region.activeSrCount + '/' + region.assignedSrCount + '</div><div class="l">SRs Active</div></div>';
+    h += '<div class="region-stat"><div class="v">' + region.avgUtilisationPct.toFixed(1) + '%</div><div class="l">Avg Util</div></div>';
+    h += '</div>';
+
+    // Utilisation bar
+    var barPct = Math.min(100, region.avgUtilisationPct);
+    var barClass = barPct >= 90 ? 'high' : (barPct >= 60 ? 'mid' : 'low');
+    h += '<div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">';
+    h += '<div class="util-bar-wrap" style="flex:1"><div class="util-bar ' + barClass + '" style="width:' + barPct.toFixed(1) + '%"></div></div>';
+    h += '<span style="font-size:.68rem;color:#495057;white-space:nowrap">' + region.minUtilisationPct.toFixed(0) + '–' + region.maxUtilisationPct.toFixed(0) + '%</span>';
+    h += '</div>';
+
+    // SR chips
+    if (region.assignedSrNames && region.assignedSrNames.length) {
+      h += '<div class="region-sr-chips">';
+      region.assignedSrNames.forEach(function(sr) {
+        var isIdle = region.idleSrNames && region.idleSrNames.indexOf(sr) >= 0;
+        h += '<span class="sr-chip ' + (isIdle ? 'idle' : 'active') + '">' + esc(sr) + (isIdle ? ' (idle)' : '') + '</span>';
+      });
+      h += '</div>';
+    }
+
+    // Suggestions for this region
+    if (region.suggestions && region.suggestions.length) {
+      region.suggestions.forEach(function(s) {
+        var cardClass = s.priority === 'HIGH' ? 'high' : (s.priority === 'MEDIUM' ? 'medium' : 'low');
+        h += '<div class="suggestion-card ' + cardClass + '">';
+        h += '<div class="suggestion-header">💡 Move <strong>' + esc(s.srName) + '</strong> from ' + esc(s.fromRegion) + ' → ' + esc(s.toRegion) + '</div>';
+        h += '<div class="suggestion-action">' + esc(s.reason) + '</div>';
+        h += '</div>';
+      });
+    }
+
+    h += '</div>'; // region-card
+  });
+
+  list.innerHTML = h;
+}
+
+/**
+ * Auto-reassign idle SRs to overflow regions based on suggestions.
+ * Applies all HIGH and MEDIUM priority suggestions from the last allocation.
+ */
+function autoReassignSrs() {
+  var panel = document.getElementById('region-health-list');
+  if (!panel) return;
+
+  // Get suggestions from the last rendered region summaries
+  if (!lastRegionSuggestions || lastRegionSuggestions.length === 0) {
+    showAllocError('No rebalancing suggestions available. Run allocation first.');
+    return;
+  }
+
+  var applied = 0;
+  lastRegionSuggestions.forEach(function(s) {
+    if (s.priority === 'HIGH' || s.priority === 'MEDIUM') {
+      // Move SR from source region to target region
+      srZoneMap[s.srName] = s.toRegion;
+      applied++;
+    }
+  });
+
+  if (applied === 0) {
+    showAllocInfo('No idle SRs to reassign.');
+    return;
+  }
+
+  // Save and reload
+  saveRegionsToStorage();
+  showAllocInfo('✅ Auto-reassigned ' + applied + ' SR(s) to overflow regions. Click "Run with Affinity" to re-allocate.');
+
+  // Reload attendance to show updated zone dropdowns
+  var date = document.getElementById('date-select').value;
+  if (date) loadAttendance(date);
+}
+
 // ── SHIPMENT DISPLAY TOGGLE ───────────────────────────────────────────────────
 // ON  = show ALL shipments (every marker on the map)
 // OFF = show only affinity-assigned shipments (those belonging to an SR with an affinity pincode)
 var shipmentDisplayAll = true; // starts ON
+
+// ── AUTO REASSIGN STATE ──────────────────────────────────────────────────────
+var lastRegionSuggestions = []; // populated by renderRegionHealth for auto-reassign
+
+// ── DENSITY MARKERS TOGGLE ───────────────────────────────────────────────────
+// ON  = show all SR shipment markers (the colored dots/clusters on the map)
+// OFF = hide all SR shipment markers (only routes and region boundaries visible)
+var densityMarkersVisible = true;
+
+function toggleDensityMarkers() {
+  densityMarkersVisible = !densityMarkersVisible;
+
+  var label = document.getElementById('density-toggle-label');
+  var ind   = document.getElementById('density-toggle-indicator');
+  var dot   = ind ? ind.querySelector('span') : null;
+
+  if (densityMarkersVisible) {
+    // Show all markers
+    if (label) label.textContent = 'Density ON';
+    if (ind)   ind.style.background = '#43a047';
+    if (dot)   dot.style.marginLeft = 'auto';
+    Object.keys(srLayers).forEach(function(srName) {
+      var layer = srLayers[srName];
+      if (layer && layer.markers) {
+        layer.markers.forEach(function(m) { if (!map.hasLayer(m)) m.addTo(map); });
+      }
+    });
+  } else {
+    // Hide all markers
+    if (label) label.textContent = 'Density OFF';
+    if (ind)   ind.style.background = '#90a4ae';
+    if (dot)   dot.style.marginLeft = '2px';
+    Object.keys(srLayers).forEach(function(srName) {
+      var layer = srLayers[srName];
+      if (layer && layer.markers) {
+        layer.markers.forEach(function(m) { if (map.hasLayer(m)) map.removeLayer(m); });
+      }
+    });
+  }
+
+  // Also toggle on Google Maps if active
+  if (activeMapProvider === 'google' && gmapMarkers.length > 0) {
+    if (densityMarkersVisible) {
+      if (gmapMarkerClusterer) {
+        // Re-add markers to clusterer
+        gmapMarkerClusterer.addMarkers(gmapMarkers);
+      } else {
+        gmapMarkers.forEach(function(m) { m.setMap(gmap); });
+      }
+    } else {
+      if (gmapMarkerClusterer) {
+        gmapMarkerClusterer.clearMarkers();
+      } else {
+        gmapMarkers.forEach(function(m) { m.setMap(null); });
+      }
+    }
+  }
+}
 
 function toggleShipmentDisplay() {
   shipmentDisplayAll = !shipmentDisplayAll;
@@ -2469,6 +2868,11 @@ function updateSrZone(select) {
     delete srZoneMap[srName];
   }
   saveRegionsToStorage(); // persist SR→zone assignments
+}
+
+function showSrZoneSaved() {
+  var msg = document.getElementById('sr-zone-saved-msg');
+  if (msg) { msg.style.display = 'block'; setTimeout(function() { msg.style.display = 'none'; }, 3000); }
 }
 
 // Track which region is currently being edited
@@ -3039,6 +3443,64 @@ function loadRegionsFromStorage() {
     .catch(function() { /* no saved config — that's fine */ });
 }
 
+// ── ALLOCATION MODE (Time-Based vs Count-Based) ───────────────────────────────
+
+/**
+ * Get the current allocation mode from localStorage (9.2).
+ * Defaults to 'count-based' if not set.
+ */
+function getAllocationMode() {
+  return localStorage.getItem('allocationMode') || 'count-based';
+}
+
+/**
+ * Set the allocation mode, persist to localStorage, and update UI (9.1, 9.2).
+ */
+function setAllocationMode(mode) {
+  localStorage.setItem('allocationMode', mode);
+  applyAllocationModeUI(mode);
+}
+
+/**
+ * Apply visual state for the given mode (9.1, 9.4, 9.5).
+ */
+function applyAllocationModeUI(mode) {
+  var countBtn = document.getElementById('mode-count-btn');
+  var timeBtn  = document.getElementById('mode-timebased-btn');
+  var capInputs = document.getElementById('capacity-inputs');
+  var shiftInd  = document.getElementById('shift-duration-indicator');
+
+  if (mode === 'time-based') {
+    // Active: time-based
+    if (timeBtn) { timeBtn.style.background = '#1976d2'; timeBtn.style.color = '#fff'; timeBtn.style.border = 'none'; }
+    if (countBtn) { countBtn.style.background = '#e9ecef'; countBtn.style.color = '#495057'; countBtn.style.border = '1px solid #ced4da'; }
+    // 9.4: hide capacity inputs, show shift duration indicator
+    if (capInputs) capInputs.style.display = 'none';
+    if (shiftInd)  shiftInd.style.display = 'block';
+  } else {
+    // Active: count-based
+    if (countBtn) { countBtn.style.background = '#1976d2'; countBtn.style.color = '#fff'; countBtn.style.border = 'none'; }
+    if (timeBtn)  { timeBtn.style.background = '#e9ecef'; timeBtn.style.color = '#495057'; timeBtn.style.border = '1px solid #ced4da'; }
+    // 9.5: show capacity inputs, hide shift duration indicator
+    if (capInputs) capInputs.style.display = 'block';
+    if (shiftInd)  shiftInd.style.display = 'none';
+  }
+}
+
+/**
+ * Update the shift duration label from a response's shiftDurationMinutes field.
+ */
+function updateShiftDurationLabel(shiftDurationMinutes) {
+  var label = document.getElementById('shift-duration-label');
+  if (!label) return;
+  if (shiftDurationMinutes != null) {
+    var hours = shiftDurationMinutes / 60;
+    label.textContent = (Number.isInteger(hours) ? hours : hours.toFixed(1)) + ' h shift';
+  } else {
+    label.textContent = '8 h shift';
+  }
+}
+
 function runAffinityAllocation() {
   var date = document.getElementById('date-select').value;
   if (!date) { showAllocError('Select a date first.'); return; }
@@ -3067,6 +3529,15 @@ function runAffinityAllocation() {
     }
   }
 
+  // Warn if time-based mode and no SRs assigned to zones
+  if (getAllocationMode() === 'time-based') {
+    var totalAssigned = Object.keys(srCounts).reduce(function(sum, k) { return sum + srCounts[k]; }, 0);
+    if (totalAssigned === 0) {
+      showAllocError('⚠️ No SRs assigned to zones! In Time-Based mode, assign SRs to zones using the dropdown next to each SR in the Attendance panel, then click Save before running.');
+      return;
+    }
+  }
+
   fetch('/api/affinity-match/set-custom-regions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3075,19 +3546,37 @@ function runAffinityAllocation() {
   .then(function(r) { return r.json(); })
   .then(function(setResult) {
     if (setResult.error) { showAllocError(setResult.error); return; }
+    // 9.3: include allocationMode in the request body
+    var allocMode = getAllocationMode();
+    var allocBody = { date: date, allocationMode: allocMode };
     return fetch('/api/affinity-match/allocate-custom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ date: date })
+      body: JSON.stringify(allocBody)
     });
   })
   .then(function(r) { if (r) return r.json(); })
   .then(function(data) {
     if (!data) return;
-    if (data.error) { showAllocError(data.error); return; }
+    if (data.error) {
+      // 9.9: error message in time-based mode should not reference count-based fields
+      if (getAllocationMode() === 'time-based') {
+        showAllocError('Allocation failed. Please check your affinity configuration.');
+      } else {
+        showAllocError(data.error);
+      }
+      return;
+    }
     _handleAffinityResult(data, date);
   })
-  .catch(function(e) { showAllocError('Zone allocation failed: ' + e.message); });
+  .catch(function(e) {
+    // 9.9: mode-aware error message
+    if (getAllocationMode() === 'time-based') {
+      showAllocError('Allocation failed. Please check your affinity configuration.');
+    } else {
+      showAllocError('Zone allocation failed: ' + e.message);
+    }
+  });
 }
 
 /** Shared result handler for affinity allocation. */
@@ -3100,6 +3589,7 @@ function _handleAffinityResult(data, date) {
     document.getElementById('summary-mode-badge').style.background = modeBg;
     renderSummary(summary);
     renderSrList(summary.srSummaries);
+    renderRegionHealth(summary);
     lmShowPanel(summary.srSummaries);
     renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode || 'osm');
   }
@@ -3137,8 +3627,8 @@ function loadPreviousAllocation() {
   // Reset other mode buttons
   document.getElementById('mode-standard-btn').style.background = '#e9ecef';
   document.getElementById('mode-standard-btn').style.color = '#495057';
-  document.getElementById('mode-affinity-btn').style.background = '#e9ecef';
-  document.getElementById('mode-affinity-btn').style.color = '#495057';
+  var affinityModeBtn = document.getElementById('mode-affinity-btn');
+  if (affinityModeBtn) { affinityModeBtn.style.background = '#e9ecef'; affinityModeBtn.style.color = '#495057'; }
 
   fetch('/api/previous/' + encodeURIComponent(date) + '/summary')
     .then(function(r) { return r.json(); })
@@ -3546,6 +4036,9 @@ function lmConfirmAll() {
 window.addEventListener('load', function() {
   initMap();
   initUpload();
+
+  // 9.2: Restore allocation mode from localStorage on page load
+  applyAllocationModeUI(getAllocationMode());
 
   document.getElementById('run-osm-btn').addEventListener('click', function() { runAllocation('osm'); });
   document.getElementById('run-google-btn').addEventListener('click', function() { runAllocation('google'); });

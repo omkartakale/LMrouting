@@ -26,13 +26,24 @@ public class AllocationController {
     private static final DateTimeFormatter FMT_DMY2 = DateTimeFormatter.ofPattern("d-MMM-yy", Locale.ENGLISH);
     private static final DateTimeFormatter FMT_SLASH = DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ENGLISH);
 
-    // Timeline constants
-    private static final double DELIVERY_TIME_MIN = 3.0;   // 3 min handling per stop
-    private static final double BREAK_BUFFER_MIN  = 30.0;  // 30 min break buffer per run
+    // Timeline constants — configurable via application.properties
+    // These must match the workload calculator handling times for consistency
+    @Value("${allocation.handling.time.default:5.0}")
+    private double deliveryTimeMin;  // per-stop handling time in minutes
+
+    // Break buffer is included in the timeline AND the workload calculator
+    @Value("${allocation.shift.break.minutes:30.0}")
+    private double breakBufferMin;  // break buffer per shift
 
     private final AllocationEngineService allocationEngineService;
     private final OverrideManagerService overrideManagerService;
     private final GoogleMapsService googleMapsService;
+
+    @Value("${allocation.handling.time.cod:6.0}")
+    private double handlingTimeCod;
+
+    @Value("${allocation.handling.time.prepaid:5.0}")
+    private double handlingTimePrepaid;
 
     @Value("${hub.latitude:18.4600561}")
     private double hubLat;
@@ -43,7 +54,7 @@ public class AllocationController {
     @PostMapping
     public ResponseEntity<AllocationSummary> allocate(@RequestBody AllocateRequest request) {
         LocalDate date = parseDate(request.date());
-        AllocationSummary summary = allocationEngineService.allocate(date);
+        AllocationSummary summary = allocationEngineService.allocate(date, request);
         return ResponseEntity.ok(summary);
     }
 
@@ -191,7 +202,7 @@ public class AllocationController {
 
             // Insert break buffer at midpoint
             if (!breakInserted && i == breakInsertedAfterStop) {
-                currentMinutes += BREAK_BUFFER_MIN;
+                currentMinutes += breakBufferMin;
                 breakInserted = true;
             }
 
@@ -199,8 +210,13 @@ public class AllocationController {
             totalTravelMin += travelMin;
             double arrivalMinutes = currentMinutes;
 
-            currentMinutes += DELIVERY_TIME_MIN;
-            totalDeliveryMin += DELIVERY_TIME_MIN;
+            // Use order-type-specific handling time (COD=6min, Prepaid=5min, default=5min)
+            double stopHandlingTime = "COD".equals(stop.orderType()) ? handlingTimeCod
+                    : "Prepaid".equals(stop.orderType()) ? handlingTimePrepaid
+                    : deliveryTimeMin;
+
+            currentMinutes += stopHandlingTime;
+            totalDeliveryMin += stopHandlingTime;
             double departureMinutes = currentMinutes;
 
             Map<String, Object> stopEntry = new LinkedHashMap<>();
@@ -215,7 +231,7 @@ public class AllocationController {
             // Haversine distance from previous point (hub or last stop) in km
             double distKm = i < legDistances.size() ? legDistances.get(i) : 0.0;
             stopEntry.put("distFromPrevKm",    Math.round(distKm * 100.0) / 100.0);
-            stopEntry.put("deliveryMin",       DELIVERY_TIME_MIN);
+            stopEntry.put("deliveryMin",       stopHandlingTime);
             stopEntry.put("arrivalTime",       minutesToTime(arrivalMinutes));
             stopEntry.put("departureTime",     minutesToTime(departureMinutes));
             stopEntry.put("arrivalMinutes",    Math.round(arrivalMinutes * 10.0) / 10.0);
@@ -243,7 +259,7 @@ public class AllocationController {
         result.put("totalDurationMinutes", Math.round(totalDuration * 10.0) / 10.0);
         result.put("travelMinutes",        Math.round(totalTravelMin * 10.0) / 10.0);
         result.put("deliveryMinutes",      Math.round(totalDeliveryMin * 10.0) / 10.0);
-        result.put("breakMinutes",         BREAK_BUFFER_MIN);
+        result.put("breakMinutes",         breakBufferMin);
         result.put("stopCount",            orderedStops.size());
         result.put("breakAfterStop",       breakInsertedAfterStop);
         result.put("stops",                timelineStops);
@@ -251,7 +267,7 @@ public class AllocationController {
 
         log.info("Timeline for {} on {}: {} stops, {:.1f} min total ({:.1f} travel + {:.1f} delivery + {} break)",
                 srName, dateStr, orderedStops.size(), totalDuration,
-                totalTravelMin, totalDeliveryMin, BREAK_BUFFER_MIN);
+                totalTravelMin, totalDeliveryMin, breakBufferMin);
 
         return ResponseEntity.ok(result);
     }

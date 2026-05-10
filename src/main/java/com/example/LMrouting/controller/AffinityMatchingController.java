@@ -1,8 +1,10 @@
 package com.example.LMrouting.controller;
 
 import com.example.LMrouting.dto.AllocationSummary;
+import com.example.LMrouting.dto.AllocateRequest;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.service.AffinityMatchingService;
+import com.example.LMrouting.service.AffinityShiftAllocationService;
 import com.example.LMrouting.service.AllocationEngineService;
 import com.example.LMrouting.service.PincodeBoundaryService;
 import com.example.LMrouting.service.PincodeClusteringService;
@@ -34,6 +36,7 @@ public class AffinityMatchingController {
 
     private final AffinityMatchingService affinityMatchingService;
     private final AllocationEngineService allocationEngineService;
+    private final AffinityShiftAllocationService affinityShiftAllocationService;
     private final PincodeClusteringService pincodeClusteringService;
     private final PincodeBoundaryService pincodeBoundaryService;
     private final RouteOptimizerService routeOptimizerService;
@@ -47,6 +50,9 @@ public class AffinityMatchingController {
 
     // User-specified SR count per region: regionName → number of SRs to assign
     private final Map<String, Integer> customRegionSrCounts = new LinkedHashMap<>();
+
+    // SR → zone assignment from the frontend attendance panel
+    private final Map<String, String> srZoneMap = new LinkedHashMap<>();
 
     /**
      * Set/update SR affinities.
@@ -358,6 +364,15 @@ public class AffinityMatchingController {
             }
         }
 
+        // Store SR → zone assignments from the attendance panel (optional)
+        @SuppressWarnings("unchecked")
+        Map<String, String> srZoneMapRaw = (Map<String, String>) request.get("srZoneMap");
+        if (srZoneMapRaw != null) {
+            srZoneMap.clear();
+            srZoneMap.putAll(srZoneMapRaw);
+            log.info("AffinityMatch: stored {} SR→zone assignments: {}", srZoneMap.size(), srZoneMap);
+        }
+
         log.info("AffinityMatch: stored {} custom regions, SR counts: {}", customRegions.size(), customRegionSrCounts);
         return ResponseEntity.ok(Map.of("success", true, "regionCount", customRegions.size(),
                 "srCountsProvided", customRegionSrCounts.size()));
@@ -386,6 +401,34 @@ public class AffinityMatchingController {
         }
 
         LocalDate date = AllocationController.parseDate(dateStr);
+        String allocationMode = request.get("allocationMode");
+
+        // ── TIME-BASED MODE: delegate entirely to AffinityShiftAllocationService ──
+        // This bypasses the count-based 80-cap pipeline completely.
+        // The AffinityShiftAllocationService reads the affinity config from storage
+        // (saved by /api/affinity-config/save) and runs the full shift-time pipeline.
+        if ("time-based".equals(allocationMode)) {
+            try {
+                AllocateRequest allocRequest = new AllocateRequest(dateStr, "time-based");
+                AllocationSummary summary = affinityShiftAllocationService.allocate(date, allocRequest);
+
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("date", summary.date());
+                result.put("mode", "affinity-custom");
+                result.put("allocationMode", "time-based");
+                result.put("customRegionSRs", summary.totalSrs());
+                result.put("totalSRs", summary.totalSrs());
+                result.put("regionCount", customRegions.size());
+                result.put("unallocatedShipments", summary.unallocatedShipments());
+                result.put("allocationSummary", summary);
+                result.put("affinityScores", buildAffinityScores(summary));
+                return ResponseEntity.ok(result);
+            } catch (Exception e) {
+                log.error("AffinityMatch custom (time-based): allocation failed", e);
+                return ResponseEntity.internalServerError()
+                        .body(Map.of("error", "Time-based allocation failed: " + e.getMessage()));
+            }
+        }
 
         // Step 1: Run standard allocation to get filtered shipments + present SRs
         AllocationSummary summary = allocationEngineService.allocate(date);
@@ -612,5 +655,24 @@ public class AffinityMatchingController {
             }
         }
         return inside;
+    }
+
+    /**
+     * Build affinity scores map from an AllocationSummary (for time-based mode response).
+     */
+    private Map<String, Map<String, Object>> buildAffinityScores(AllocationSummary summary) {
+        Map<String, Map<String, Object>> scores = new LinkedHashMap<>();
+        if (summary.srSummaries() == null) return scores;
+        for (var sr : summary.srSummaries()) {
+            Map<String, Object> sc = new LinkedHashMap<>();
+            sc.put("affinityShipments", sr.shipmentCount());
+            sc.put("totalShipments", sr.shipmentCount());
+            sc.put("affinityPct", 100.0);
+            if (sr.affinityStatus() != null) sc.put("affinityStatus", sr.affinityStatus());
+            if (sr.shiftUtilisationPct() != null) sc.put("shiftUtilisationPct", sr.shiftUtilisationPct());
+            if (sr.estimatedWorkloadMinutes() != null) sc.put("estimatedWorkloadMinutes", sr.estimatedWorkloadMinutes());
+            scores.put(sr.srName(), sc);
+        }
+        return scores;
     }
 }
