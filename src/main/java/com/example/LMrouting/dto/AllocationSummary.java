@@ -43,7 +43,11 @@ public record AllocationSummary(
         Integer overflowShipments,   // null in count-based
         Integer noRegionShipments,   // null in count-based
         // ── Region health summaries (null in count-based mode) ────────────────
-        List<RegionSummaryDto> regionSummaries  // per-region health + rebalancing suggestions
+        List<RegionSummaryDto> regionSummaries,  // per-region health + rebalancing suggestions
+        // ── Operational warnings (null in count-based mode) ───────────────────
+        List<String> operationalWarnings,  // no-SR region warnings, overloaded/idle SR warnings
+        // ── Earnings imbalance warning (null in count-based mode) ─────────────
+        Boolean earningsImbalanceWarning   // true when > 50% of SRs exceed ±20% of median earnings
 ) {
     /**
      * Backward-compatible constructor without earnings metrics or time-based fields.
@@ -57,7 +61,7 @@ public record AllocationSummary(
              capacityRangeMin, capacityRangeMax,
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, 0.0, 0.0, 0.0,
-             null, null, null, null, null);
+             null, null, null, null, null, null, null);
     }
 
     /**
@@ -73,6 +77,47 @@ public record AllocationSummary(
              capacityRangeMin, capacityRangeMax,
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
-             null, null, null, null, null);
+             null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Backward-compatible constructor with time-based fields but without operationalWarnings.
+     */
+    public AllocationSummary(String date, int totalShipments, int allocatedShipments,
+                              int unallocatedShipments, int capacityRangeMin, int capacityRangeMax,
+                              int totalSrs, int minShipmentsPerSr, int maxShipmentsPerSr,
+                              double avgShipmentsPerSr, double fairnessVariance,
+                              List<SrSummaryDto> srSummaries,
+                              double earningsVariance, double earningsRange, double meanNetEarnings,
+                              String allocationMode, Integer shiftDurationMinutes,
+                              Integer overflowShipments, Integer noRegionShipments,
+                              List<RegionSummaryDto> regionSummaries) {
+        this(date, totalShipments, allocatedShipments, unallocatedShipments,
+             capacityRangeMin, capacityRangeMax,
+             totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
+             fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
+             allocationMode, shiftDurationMinutes, overflowShipments, noRegionShipments,
+             regionSummaries, null, null);
+    }
+
+    /**
+     * Backward-compatible constructor with operationalWarnings but without earningsImbalanceWarning.
+     */
+    public AllocationSummary(String date, int totalShipments, int allocatedShipments,
+                              int unallocatedShipments, int capacityRangeMin, int capacityRangeMax,
+                              int totalSrs, int minShipmentsPerSr, int maxShipmentsPerSr,
+                              double avgShipmentsPerSr, double fairnessVariance,
+                              List<SrSummaryDto> srSummaries,
+                              double earningsVariance, double earningsRange, double meanNetEarnings,
+                              String allocationMode, Integer shiftDurationMinutes,
+                              Integer overflowShipments, Integer noRegionShipments,
+                              List<RegionSummaryDto> regionSummaries,
+                              List<String> operationalWarnings) {
+        this(date, totalShipments, allocatedShipments, unallocatedShipments,
+             capacityRangeMin, capacityRangeMax,
+             totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
+             fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
+             allocationMode, shiftDurationMinutes, overflowShipments, noRegionShipments,
+             regionSummaries, operationalWarnings, null);
     }
 }

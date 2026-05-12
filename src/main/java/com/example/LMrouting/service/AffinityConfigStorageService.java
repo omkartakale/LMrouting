@@ -99,4 +99,55 @@ public class AffinityConfigStorageService {
     public String getStoragePath() {
         return configFilePath;
     }
+
+    /**
+     * Load the per-SR shift durations map from the affinity config.
+     *
+     * <p>The {@code srShiftDurations} field is stored in the same JSON file as
+     * {@code srZoneMap} and {@code regions}. When absent or null, returns an empty map
+     * (all SRs fall back to the global default shift duration).
+     *
+     * @return a non-null map of SR name → shift duration in minutes (empty if not configured)
+     * @throws IOException if the config file cannot be read
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Integer> loadSrShiftDurations() throws IOException {
+        Map<String, Object> config = loadConfig();
+        Object raw = config.get("srShiftDurations");
+        if (raw == null) {
+            return new HashMap<>();
+        }
+        if (raw instanceof Map) {
+            Map<String, Object> rawMap = (Map<String, Object>) raw;
+            Map<String, Integer> result = new HashMap<>();
+            for (Map.Entry<String, Object> entry : rawMap.entrySet()) {
+                if (entry.getValue() instanceof Number) {
+                    result.put(entry.getKey(), ((Number) entry.getValue()).intValue());
+                }
+            }
+            return result;
+        }
+        return new HashMap<>();
+    }
+
+    /**
+     * Save per-SR shift durations into the affinity config.
+     *
+     * <p>Merges the {@code srShiftDurations} map into the existing config without
+     * overwriting other fields (regions, srZoneMap, etc.).
+     *
+     * @param srShiftDurations map of SR name → shift duration in minutes
+     * @throws IOException if the config file cannot be written
+     */
+    public void saveSrShiftDurations(Map<String, Integer> srShiftDurations) throws IOException {
+        Map<String, Object> config = loadConfig();
+        if (srShiftDurations == null || srShiftDurations.isEmpty()) {
+            config.remove("srShiftDurations");
+        } else {
+            config.put("srShiftDurations", srShiftDurations);
+        }
+        saveConfig(config);
+        log.info("AffinityConfigStorage: saved srShiftDurations ({} entries)", 
+                srShiftDurations != null ? srShiftDurations.size() : 0);
+    }
 }

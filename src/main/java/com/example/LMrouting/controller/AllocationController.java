@@ -1,20 +1,30 @@
 package com.example.LMrouting.controller;
 
 import com.example.LMrouting.dto.*;
+import com.example.LMrouting.exception.AllocationNotFoundException;
+import com.example.LMrouting.model.Shipment;
+import com.example.LMrouting.service.AffinityConfigStorageService;
+import com.example.LMrouting.service.AffinityShiftAllocationService;
 import com.example.LMrouting.service.AllocationEngineService;
 import com.example.LMrouting.service.GoogleMapsService;
 import com.example.LMrouting.service.OverrideManagerService;
+import com.example.LMrouting.service.SrTimelineService;
+import com.example.LMrouting.service.TravelTimeCacheService;
+import com.example.LMrouting.store.InMemoryStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/allocate")
@@ -26,30 +36,14 @@ public class AllocationController {
     private static final DateTimeFormatter FMT_DMY2 = DateTimeFormatter.ofPattern("d-MMM-yy", Locale.ENGLISH);
     private static final DateTimeFormatter FMT_SLASH = DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ENGLISH);
 
-    // Timeline constants — configurable via application.properties
-    // These must match the workload calculator handling times for consistency
-    @Value("${allocation.handling.time.default:5.0}")
-    private double deliveryTimeMin;  // per-stop handling time in minutes
-
-    // Break buffer is included in the timeline AND the workload calculator
-    @Value("${allocation.shift.break.minutes:30.0}")
-    private double breakBufferMin;  // break buffer per shift
-
     private final AllocationEngineService allocationEngineService;
+    private final AffinityShiftAllocationService affinityShiftAllocationService;
+    private final AffinityConfigStorageService affinityConfigStorageService;
     private final OverrideManagerService overrideManagerService;
     private final GoogleMapsService googleMapsService;
-
-    @Value("${allocation.handling.time.cod:6.0}")
-    private double handlingTimeCod;
-
-    @Value("${allocation.handling.time.prepaid:5.0}")
-    private double handlingTimePrepaid;
-
-    @Value("${hub.latitude:18.4600561}")
-    private double hubLat;
-
-    @Value("${hub.longitude:73.8884305}")
-    private double hubLng;
+    private final TravelTimeCacheService travelTimeCache;
+    private final SrTimelineService srTimelineService;
+    private final InMemoryStore store;
 
     @PostMapping
     public ResponseEntity<AllocationSummary> allocate(@RequestBody AllocateRequest request) {
@@ -127,156 +121,298 @@ public class AllocationController {
     }
 
     /**
-     * Get the delivery timeline for an SR's route.
+     * Get the delivery timeline for an SR's route using SrTimelineService.
      *
-     * Calculates: Hub → Stop 1 (travel + 3 min delivery) → Stop 2 → … → Hub return
-     * Includes a 30-minute break buffer inserted at the midpoint of the route.
+     * Returns SrTimelineDto with stop-by-stop ETA progression aligned with packing-time calculations.
+     * Uses the same Haversine-based travel-time logic as ShiftWorkloadCalculatorService,
+     * ensuring the ETA shown to the supervisor matches what was used during allocation decisions.
      *
      * GET /api/allocate/{date}/sr/{srName}/timeline
      * Optional query param: startTime=09:00 (default 09:00)
      *
-     * Response: {
-     *   srName, date, startTime, endTime, totalDurationMinutes,
-     *   travelMinutes, deliveryMinutes, breakMinutes,
-     *   stops: [ { sequence, shippingId, pincode, lat, lng,
-     *              arrivalTime, departureTime, travelFromPrevMin, deliveryMin } ],
-     *   returnToHub: { arrivalTime, travelMin }
-     * }
+     * Returns 404 if the SR is not found or has no allocation for that date.
      */
     @GetMapping("/{date}/sr/{srName}/timeline")
-    public ResponseEntity<Map<String, Object>> getSrTimeline(
+    public ResponseEntity<SrTimelineDto> getSrTimeline(
             @PathVariable("date") String dateStr,
             @PathVariable("srName") String srName,
             @RequestParam(value = "startTime", defaultValue = "09:00") String startTime) {
 
-        SrRouteDto route = allocationEngineService.getSrRoute(parseDate(dateStr), srName);
-        List<ShipmentStopDto> stops = route.stops();
+        LocalDate date = parseDate(dateStr);
+        String storeDateStr = resolveStoreDateStr(date);
 
-        if (stops == null || stops.isEmpty()) {
-            return ResponseEntity.ok(Map.of("srName", srName, "date", dateStr,
-                    "message", "No stops assigned", "stops", List.of()));
+        List<Shipment> shipments = store.findShipmentsByDateAndSr(storeDateStr, srName);
+        if (shipments.isEmpty()) {
+            throw new AllocationNotFoundException(
+                    "No shipments found for SR '" + srName + "' on " + dateStr);
         }
-
-        // Build ordered waypoints [lat, lng]
-        List<double[]> waypoints = stops.stream()
-                .sorted(Comparator.comparingInt(ShipmentStopDto::sequence))
-                .map(s -> new double[]{s.latitude(), s.longitude()})
-                .collect(Collectors.toList());
-
-        // Get per-leg travel durations from Google Maps (or Haversine fallback)
-        List<Double> legDurations = googleMapsService.getLegDurationsMinutes(hubLat, hubLng, waypoints);
-
-        // Compute per-leg Haversine distances (km) — hub→stop1, stop1→stop2, …, stopN→hub
-        List<Double> legDistances = new ArrayList<>();
-        double prevLat = hubLat, prevLng = hubLng;
-        for (double[] wp : waypoints) {
-            legDistances.add(GoogleMapsService.haversine(prevLat, prevLng, wp[0], wp[1]));
-            prevLat = wp[0]; prevLng = wp[1];
-        }
-        // Return leg distance
-        double returnDistKm = GoogleMapsService.haversine(prevLat, prevLng, hubLat, hubLng);
-        legDistances.add(returnDistKm);
 
         // Parse start time
-        int startHour = 9, startMin = 0;
+        java.time.LocalTime start;
         try {
-            String[] parts = startTime.split(":");
-            startHour = Integer.parseInt(parts[0]);
-            startMin  = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-        } catch (Exception ignored) {}
-
-        // Build timeline
-        double currentMinutes = startHour * 60.0 + startMin;
-        double totalTravelMin = 0, totalDeliveryMin = 0;
-        int breakInsertedAfterStop = stops.size() / 2; // break at midpoint
-        boolean breakInserted = false;
-
-        List<Map<String, Object>> timelineStops = new ArrayList<>();
-        List<ShipmentStopDto> orderedStops = stops.stream()
-                .sorted(Comparator.comparingInt(ShipmentStopDto::sequence))
-                .collect(Collectors.toList());
-
-        for (int i = 0; i < orderedStops.size(); i++) {
-            ShipmentStopDto stop = orderedStops.get(i);
-            double travelMin = i < legDurations.size() ? legDurations.get(i) : 0.0;
-
-            // Insert break buffer at midpoint
-            if (!breakInserted && i == breakInsertedAfterStop) {
-                currentMinutes += breakBufferMin;
-                breakInserted = true;
-            }
-
-            currentMinutes += travelMin;
-            totalTravelMin += travelMin;
-            double arrivalMinutes = currentMinutes;
-
-            // Use order-type-specific handling time (COD=6min, Prepaid=5min, default=5min)
-            double stopHandlingTime = "COD".equals(stop.orderType()) ? handlingTimeCod
-                    : "Prepaid".equals(stop.orderType()) ? handlingTimePrepaid
-                    : deliveryTimeMin;
-
-            currentMinutes += stopHandlingTime;
-            totalDeliveryMin += stopHandlingTime;
-            double departureMinutes = currentMinutes;
-
-            Map<String, Object> stopEntry = new LinkedHashMap<>();
-            stopEntry.put("sequence",          stop.sequence());
-            stopEntry.put("shippingId",        stop.shippingId());
-            stopEntry.put("pincode",           stop.dropPincode());
-            stopEntry.put("lat",               stop.latitude());
-            stopEntry.put("lng",               stop.longitude());
-            stopEntry.put("orderType",         stop.orderType());
-            stopEntry.put("isHeavy",           stop.isHeavy());
-            stopEntry.put("travelFromPrevMin", Math.round(travelMin * 10.0) / 10.0);
-            // Haversine distance from previous point (hub or last stop) in km
-            double distKm = i < legDistances.size() ? legDistances.get(i) : 0.0;
-            stopEntry.put("distFromPrevKm",    Math.round(distKm * 100.0) / 100.0);
-            stopEntry.put("deliveryMin",       stopHandlingTime);
-            stopEntry.put("arrivalTime",       minutesToTime(arrivalMinutes));
-            stopEntry.put("departureTime",     minutesToTime(departureMinutes));
-            stopEntry.put("arrivalMinutes",    Math.round(arrivalMinutes * 10.0) / 10.0);
-            timelineStops.add(stopEntry);
+            start = java.time.LocalTime.parse(startTime);
+        } catch (Exception e) {
+            start = java.time.LocalTime.of(9, 0);
         }
 
-        // Return to hub
-        double returnTravelMin = legDurations.size() > orderedStops.size()
-                ? legDurations.get(orderedStops.size()) : 0.0;
-        currentMinutes += returnTravelMin;
-        totalTravelMin += returnTravelMin;
+        SrTimelineDto timeline = srTimelineService.buildTimeline(srName, shipments, start);
+        return ResponseEntity.ok(timeline);
+    }
 
-        double totalDuration = currentMinutes - (startHour * 60.0 + startMin);
+    // =========================================================================
+    // Draft Reassignment Endpoints
+    // =========================================================================
 
-        Map<String, Object> returnToHub = new LinkedHashMap<>();
-        returnToHub.put("travelMin",   Math.round(returnTravelMin * 10.0) / 10.0);
-        returnToHub.put("distKm",      Math.round(returnDistKm * 100.0) / 100.0);
-        returnToHub.put("arrivalTime", minutesToTime(currentMinutes));
+    /**
+     * Get draft reassignment recommendations (computed but NOT persisted).
+     *
+     * <p>Computes SR rebalancing suggestions based on the current allocation state:
+     * identifies idle/underloaded SRs in one region that could be moved to
+     * overloaded regions with overflow shipments.
+     *
+     * <p>Draft targets:
+     * <ul>
+     *   <li>80-90% utilization for reassigned SRs (moved to a new region)</li>
+     *   <li>&gt;90% utilization for native-region SRs (staying in their original region)</li>
+     * </ul>
+     *
+     * GET /api/allocate/{date}/rebalance/draft
+     */
+    @GetMapping("/{date}/rebalance/draft")
+    public ResponseEntity<DraftReassignmentDto> getDraftReassignment(@PathVariable("date") String dateStr) {
+        LocalDate date = parseDate(dateStr);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("srName",               srName);
-        result.put("date",                 dateStr);
-        result.put("startTime",            minutesToTime(startHour * 60.0 + startMin));
-        result.put("endTime",              minutesToTime(currentMinutes));
-        result.put("totalDurationMinutes", Math.round(totalDuration * 10.0) / 10.0);
-        result.put("travelMinutes",        Math.round(totalTravelMin * 10.0) / 10.0);
-        result.put("deliveryMinutes",      Math.round(totalDeliveryMin * 10.0) / 10.0);
-        result.put("breakMinutes",         breakBufferMin);
-        result.put("stopCount",            orderedStops.size());
-        result.put("breakAfterStop",       breakInsertedAfterStop);
-        result.put("stops",                timelineStops);
-        result.put("returnToHub",          returnToHub);
+        // Get the latest allocation summary to extract region summaries and suggestions
+        AllocationSummary summary = allocationEngineService.getSummary(date);
 
-        log.info("Timeline for {} on {}: {} stops, {:.1f} min total ({:.1f} travel + {:.1f} delivery + {} break)",
-                srName, dateStr, orderedStops.size(), totalDuration,
-                totalTravelMin, totalDeliveryMin, breakBufferMin);
+        List<SrRebalanceSuggestion> recommendations = new ArrayList<>();
+        int estimatedAdditionalShipments = 0;
+
+        if (summary.regionSummaries() != null) {
+            for (RegionSummaryDto region : summary.regionSummaries()) {
+                if (region.suggestions() != null) {
+                    recommendations.addAll(region.suggestions());
+                }
+            }
+            // Estimate additional shipments that could be allocated
+            estimatedAdditionalShipments = recommendations.stream()
+                    .mapToInt(SrRebalanceSuggestion::toRegionOverflow)
+                    .sum();
+        }
+
+        int highCount = (int) recommendations.stream()
+                .filter(r -> "HIGH".equals(r.priority()))
+                .count();
+        int mediumCount = (int) recommendations.stream()
+                .filter(r -> "MEDIUM".equals(r.priority()))
+                .count();
+
+        String message = recommendations.isEmpty()
+                ? "No reassignment recommendations — all regions are balanced."
+                : String.format("%d recommendation(s) found. Review and POST to /rebalance/save to apply.",
+                        recommendations.size());
+
+        DraftReassignmentDto draft = new DraftReassignmentDto(
+                dateStr,
+                "draft",
+                recommendations,
+                recommendations.size(),
+                highCount,
+                mediumCount,
+                80.0,
+                90.0,
+                90.0,
+                estimatedAdditionalShipments,
+                message
+        );
+
+        return ResponseEntity.ok(draft);
+    }
+
+    /**
+     * Persist draft reassignment — updates SR-to-region assignments in affinity
+     * config and re-runs allocation.
+     *
+     * <p>Accepts the list of SR reassignment suggestions to apply. For each
+     * suggestion, the SR is moved from its current region to the target region
+     * in the affinity configuration (srZoneMap). Then allocation is re-run
+     * with the updated configuration.
+     *
+     * POST /api/allocate/{date}/rebalance/save
+     *
+     * Request body (optional): list of SR names to reassign. If empty/null,
+     * applies ALL draft recommendations.
+     */
+    @PostMapping("/{date}/rebalance/save")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<DraftReassignmentDto> saveDraftReassignment(
+            @PathVariable("date") String dateStr,
+            @RequestBody(required = false) Map<String, Object> requestBody) {
+
+        LocalDate date = parseDate(dateStr);
+
+        // Step 1: Get current draft recommendations
+        AllocationSummary summary = allocationEngineService.getSummary(date);
+
+        List<SrRebalanceSuggestion> allRecommendations = new ArrayList<>();
+        if (summary.regionSummaries() != null) {
+            for (RegionSummaryDto region : summary.regionSummaries()) {
+                if (region.suggestions() != null) {
+                    allRecommendations.addAll(region.suggestions());
+                }
+            }
+        }
+
+        if (allRecommendations.isEmpty()) {
+            DraftReassignmentDto result = new DraftReassignmentDto(
+                    dateStr, "saved", List.of(), 0, 0, 0,
+                    80.0, 90.0, 90.0, 0,
+                    "No recommendations to apply — all regions are already balanced."
+            );
+            return ResponseEntity.ok(result);
+        }
+
+        // Step 2: Determine which SRs to reassign
+        List<String> srNamesToReassign = null;
+        if (requestBody != null && requestBody.containsKey("srNames")) {
+            Object srNamesObj = requestBody.get("srNames");
+            if (srNamesObj instanceof List) {
+                srNamesToReassign = (List<String>) srNamesObj;
+            }
+        }
+
+        // Filter recommendations to only those requested (or all if none specified)
+        List<SrRebalanceSuggestion> toApply;
+        if (srNamesToReassign != null && !srNamesToReassign.isEmpty()) {
+            final List<String> finalSrNames = srNamesToReassign;
+            toApply = allRecommendations.stream()
+                    .filter(r -> finalSrNames.contains(r.srName()))
+                    .toList();
+        } else {
+            toApply = allRecommendations;
+        }
+
+        if (toApply.isEmpty()) {
+            DraftReassignmentDto result = new DraftReassignmentDto(
+                    dateStr, "saved", List.of(), 0, 0, 0,
+                    80.0, 90.0, 90.0, 0,
+                    "No matching recommendations found for the specified SR names."
+            );
+            return ResponseEntity.ok(result);
+        }
+
+        // Step 3: Update affinity config — move SRs to new regions in srZoneMap
+        try {
+            Map<String, Object> config = affinityConfigStorageService.loadConfig();
+            if (config == null) config = new HashMap<>();
+
+            Map<String, String> srZoneMap = (Map<String, String>) config.get("srZoneMap");
+            if (srZoneMap == null) {
+                srZoneMap = new HashMap<>();
+                config.put("srZoneMap", srZoneMap);
+            }
+
+            for (SrRebalanceSuggestion suggestion : toApply) {
+                log.info("Rebalance/save: moving SR '{}' from region '{}' to region '{}'",
+                        suggestion.srName(), suggestion.fromRegion(), suggestion.toRegion());
+                srZoneMap.put(suggestion.srName(), suggestion.toRegion());
+            }
+
+            // Also update assignedSRs in region definitions
+            List<Map<String, Object>> regions = (List<Map<String, Object>>) config.get("regions");
+            if (regions != null) {
+                for (SrRebalanceSuggestion suggestion : toApply) {
+                    // Remove from source region's assignedSRs
+                    for (Map<String, Object> region : regions) {
+                        String regionName = (String) region.get("name");
+                        if (suggestion.fromRegion().equals(regionName)) {
+                            List<String> assignedSRs = (List<String>) region.get("assignedSRs");
+                            if (assignedSRs != null) {
+                                assignedSRs.remove(suggestion.srName());
+                            }
+                        }
+                    }
+                    // Add to target region's assignedSRs
+                    for (Map<String, Object> region : regions) {
+                        String regionName = (String) region.get("name");
+                        if (suggestion.toRegion().equals(regionName)) {
+                            List<String> assignedSRs = (List<String>) region.get("assignedSRs");
+                            if (assignedSRs == null) {
+                                assignedSRs = new ArrayList<>();
+                                region.put("assignedSRs", assignedSRs);
+                            }
+                            if (!assignedSRs.contains(suggestion.srName())) {
+                                assignedSRs.add(suggestion.srName());
+                            }
+                        }
+                    }
+                }
+            }
+
+            affinityConfigStorageService.saveConfig(config);
+            log.info("Rebalance/save: affinity config updated with {} SR reassignment(s)", toApply.size());
+
+        } catch (IOException e) {
+            log.error("Rebalance/save: failed to update affinity config", e);
+            DraftReassignmentDto errorResult = new DraftReassignmentDto(
+                    dateStr, "error", toApply, toApply.size(), 0, 0,
+                    80.0, 90.0, 90.0, 0,
+                    "Failed to persist reassignment: " + e.getMessage()
+            );
+            return ResponseEntity.internalServerError().body(errorResult);
+        }
+
+        // Step 4: Re-run allocation with updated config
+        AllocateRequest rerunRequest = new AllocateRequest(dateStr, "time-based");
+        AllocationSummary newSummary = allocationEngineService.allocate(date, rerunRequest);
+
+        int estimatedAdditional = toApply.stream()
+                .mapToInt(SrRebalanceSuggestion::toRegionOverflow)
+                .sum();
+
+        int highCount = (int) toApply.stream()
+                .filter(r -> "HIGH".equals(r.priority()))
+                .count();
+        int mediumCount = (int) toApply.stream()
+                .filter(r -> "MEDIUM".equals(r.priority()))
+                .count();
+
+        DraftReassignmentDto result = new DraftReassignmentDto(
+                dateStr,
+                "saved",
+                toApply,
+                toApply.size(),
+                highCount,
+                mediumCount,
+                80.0,
+                90.0,
+                90.0,
+                estimatedAdditional,
+                String.format("Applied %d reassignment(s). Allocation re-run complete. " +
+                        "New allocation: %d allocated, %d unallocated.",
+                        toApply.size(),
+                        newSummary.allocatedShipments(),
+                        newSummary.unallocatedShipments())
+        );
 
         return ResponseEntity.ok(result);
     }
 
-    /** Convert minutes-since-midnight to "HH:MM" string. */
-    private static String minutesToTime(double totalMinutes) {
-        int h = (int)(totalMinutes / 60) % 24;
-        int m = (int)(totalMinutes % 60);
-        return String.format("%02d:%02d", h, m);
+    /**
+     * Resolve the date string format used in InMemoryStore for a given LocalDate.
+     * Tries multiple formats (dd-MMM-yy, d-MMM-yy, dd/MM/yyyy, ISO) to find
+     * the one that matches existing data in the store.
+     */
+    private String resolveStoreDateStr(LocalDate date) {
+        DateTimeFormatter[] fmts = { FMT_DMY, FMT_DMY2, FMT_SLASH };
+        for (DateTimeFormatter fmt : fmts) {
+            String candidate = date.format(fmt);
+            if (store.hasShipmentsForDate(candidate)) return candidate;
+        }
+        String iso = date.toString();
+        if (store.hasShipmentsForDate(iso)) return iso;
+        // Default to dd-MMM-yy format
+        return date.format(FMT_DMY);
     }
 
     /**

@@ -31,6 +31,7 @@ class TravelTimeCacheServiceTest {
         setField(cache, "hubLat", HUB_LAT);
         setField(cache, "hubLng", HUB_LNG);
         setField(cache, "avgSpeedKmh", 20.0);
+        setField(cache, "roadFactor", 1.15);
         cache.resetStats();
     }
 

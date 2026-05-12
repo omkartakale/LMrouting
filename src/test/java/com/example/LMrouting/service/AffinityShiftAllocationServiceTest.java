@@ -47,20 +47,34 @@ class AffinityShiftAllocationServiceTest {
         when(pincodeBoundaryService.getAllPincodes()).thenReturn(Collections.emptySet());
         when(pincodeBoundaryService.isLoaded()).thenReturn(false);
 
+        ClusterFirstRouteOptimizer cfro = new ClusterFirstRouteOptimizer(travelTimeCache);
+        setField(cfro, "maxClusterSize", 12);
+
+        RouteOptimizerService routeOptimizerService = mock(RouteOptimizerService.class);
+
+        EarningsBalancingService earningsBalancingService = new EarningsBalancingService(
+                workloadCalculator, routeOptimizerService);
+        setField(earningsBalancingService, "balanceTarget", 0.50);
+        setField(earningsBalancingService, "maxIterations", 50);
+
         service = new AffinityShiftAllocationService(
                 mock(com.example.LMrouting.store.InMemoryStore.class),
                 mock(AffinityConfigStorageService.class),
                 travelTimeCache,
                 workloadCalculator,
-                mock(RouteOptimizerService.class),
+                routeOptimizerService,
                 mock(HubBoundaryService.class),
-                pincodeBoundaryService
+                pincodeBoundaryService,
+                cfro,
+                new LegacyRouteOptimizer(travelTimeCache),
+                earningsBalancingService
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);
         setField(service, "shiftDurationMinutes", 480);
         setField(service, "twoOptMaxIterations", 10);
         setField(service, "allocationBoundaryKmFallback", 25.0);
+        setField(service, "routeOptimizerStrategy", "cluster-first");
     }
 
     // ── buildSrAffinityStatus ─────────────────────────────────────────────────

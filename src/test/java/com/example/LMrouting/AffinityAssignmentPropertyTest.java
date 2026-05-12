@@ -172,6 +172,9 @@ class AffinityAssignmentPropertyTest {
         when(pincodeBoundaryService.getAllPincodes()).thenReturn(Collections.emptySet());
         when(pincodeBoundaryService.isLoaded()).thenReturn(false);
 
+        ClusterFirstRouteOptimizer cfro = new ClusterFirstRouteOptimizer(cache);
+        setField(cfro, "maxClusterSize", 12);
+
         AffinityShiftAllocationService service = new AffinityShiftAllocationService(
                 mock(com.example.LMrouting.store.InMemoryStore.class),
                 mock(AffinityConfigStorageService.class),
@@ -179,13 +182,17 @@ class AffinityAssignmentPropertyTest {
                 workloadCalculator,
                 mock(RouteOptimizerService.class),
                 mock(HubBoundaryService.class),
-                pincodeBoundaryService
+                pincodeBoundaryService,
+                cfro,
+                new LegacyRouteOptimizer(cache),
+                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class))
         );
         setField(service, "hubLat", 18.4600561);
         setField(service, "hubLng", 73.8884305);
         setField(service, "shiftDurationMinutes", 480);
         setField(service, "twoOptMaxIterations", 10);
         setField(service, "allocationBoundaryKmFallback", 25.0);
+        setField(service, "routeOptimizerStrategy", "cluster-first");
         return service;
     }
 

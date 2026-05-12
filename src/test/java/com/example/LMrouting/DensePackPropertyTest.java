@@ -52,6 +52,9 @@ class DensePackPropertyTest {
         when(pincodeBoundaryService.getAllPincodes()).thenReturn(java.util.Collections.emptySet());
         when(pincodeBoundaryService.isLoaded()).thenReturn(false);
 
+        ClusterFirstRouteOptimizer cfro = new ClusterFirstRouteOptimizer(cache);
+        setField(cfro, "maxClusterSize", 12);
+
         AffinityShiftAllocationService service = new AffinityShiftAllocationService(
                 mock(com.example.LMrouting.store.InMemoryStore.class),
                 mock(AffinityConfigStorageService.class),
@@ -59,13 +62,17 @@ class DensePackPropertyTest {
                 workloadCalculator,
                 mock(RouteOptimizerService.class),
                 mock(HubBoundaryService.class),
-                pincodeBoundaryService
+                pincodeBoundaryService,
+                cfro,
+                new LegacyRouteOptimizer(cache),
+                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class))
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);
         setField(service, "shiftDurationMinutes", shiftDurationMinutes);
         setField(service, "twoOptMaxIterations", 10);
         setField(service, "allocationBoundaryKmFallback", 25.0);
+        setField(service, "routeOptimizerStrategy", "cluster-first");
         return service;
     }
 

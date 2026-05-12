@@ -52,6 +52,9 @@ public class AffinityShiftAllocationService {
     private final RouteOptimizerService routeOptimizerService;
     private final HubBoundaryService hubBoundaryService;
     private final PincodeBoundaryService pincodeBoundaryService;
+    private final ClusterFirstRouteOptimizer clusterFirstRouteOptimizer;
+    private final LegacyRouteOptimizer legacyRouteOptimizer;
+    private final EarningsBalancingService earningsBalancingService;
 
     @Value("${hub.name:PNQ HDP}")
     private String hubName;
@@ -73,6 +76,12 @@ public class AffinityShiftAllocationService {
 
     @Value("${allocation.shift.target.utilisation:0.88}")
     private double targetUtilisation;
+
+    @Value("${allocation.leftover.min.threshold:10}")
+    private int leftoverMinThreshold;
+
+    @Value("${allocation.route.optimizer.strategy:cluster-first}")
+    private String routeOptimizerStrategy;
 
     private final TwoOptRouteOptimizer twoOptOptimizer = new TwoOptRouteOptimizer();
 
@@ -125,6 +134,12 @@ public class AffinityShiftAllocationService {
 
         Map<String, Set<String>> regionPincodes = buildRegionPincodes(config);
 
+        // ── Extract per-SR shift durations (empty map if not configured) ──────
+        Map<String, Integer> srShiftDurations = extractSrShiftDurations(config);
+        if (!srShiftDurations.isEmpty()) {
+            log.info("AffinityShiftAllocationService: loaded per-SR shift durations: {}", srShiftDurations);
+        }
+
         // ── Phase 2: Build SR affinity status ─────────────────────────────────
         Map<String, String> srAffinityStatus = buildSrAffinityStatus(presentSrs, config);
         srAffinityStatus.forEach((sr, status) ->
@@ -152,6 +167,8 @@ public class AffinityShiftAllocationService {
         for (String sr : presentSrs) srAssignments.put(sr, new ArrayList<>());
 
         List<Shipment> overflowShipments = new ArrayList<>();
+        List<String> operationalWarnings = new ArrayList<>();
+        Set<String> smallLeftoverRegions = new HashSet<>();
 
         for (Map.Entry<String, List<Shipment>> regionEntry : regionShipments.entrySet()) {
             String regionName = regionEntry.getKey();
@@ -161,13 +178,16 @@ public class AffinityShiftAllocationService {
                     regionName, regionSrNames, regionEntry.getValue().size());
 
             if (regionSrNames.isEmpty()) {
-                log.warn("AffinityShiftAllocationService: region '{}' has no present SRs — treating as no-region",
-                        regionName);
+                int shipmentCount = regionEntry.getValue().size();
+                String warning = String.format("Region %s has %d shipments but no assigned SRs",
+                        regionName, shipmentCount);
+                operationalWarnings.add(warning);
+                log.warn("AffinityShiftAllocationService: CONFIGURATION WARNING — {}", warning);
                 noRegionShipments.addAll(regionEntry.getValue());
                 continue;
             }
 
-            DensePackResult packResult = densePackRegion(regionEntry.getValue(), regionSrNames);
+            DensePackResult packResult = densePackRegion(regionEntry.getValue(), regionSrNames, srShiftDurations);
             packResult.assignments().forEach((sr, shipments) -> {
                 log.info("AffinityShiftAllocationService: Phase 5 — SR '{}' gets {} shipments from region '{}'",
                         sr, shipments.size(), regionName);
@@ -175,9 +195,70 @@ public class AffinityShiftAllocationService {
             });
 
             if (!packResult.overflow().isEmpty()) {
-                log.warn("AffinityShiftAllocationService: region '{}' has {} overflow shipments",
-                        regionName, packResult.overflow().size());
-                overflowShipments.addAll(packResult.overflow());
+                int overflowCount = packResult.overflow().size();
+
+                // ── Small leftover guard ──────────────────────────────────────
+                // If overflow < threshold, attempt consolidation into existing SRs
+                // in this region. If consolidation fails, mark as unallocated
+                // rather than activating a new SR.
+                if (overflowCount < leftoverMinThreshold) {
+                    log.info("AffinityShiftAllocationService: region '{}' has {} overflow shipments (< threshold {}), attempting consolidation",
+                            regionName, overflowCount, leftoverMinThreshold);
+
+                    // Try to consolidate into existing SRs in this region (strict shift cap)
+                    double overfillTolerance = 1.0;
+                    List<Shipment> consolidated = new ArrayList<>();
+                    List<Shipment> unconsolidated = new ArrayList<>();
+
+                    for (Shipment s : packResult.overflow()) {
+                        boolean placed = false;
+                        // Try SRs in this region sorted by current load descending (fill busiest first)
+                        List<String> srsByLoad = regionSrNames.stream()
+                                .filter(sr -> srAssignments.get(sr) != null && !srAssignments.get(sr).isEmpty())
+                                .sorted(Comparator.comparingInt(
+                                        (String sr) -> srAssignments.get(sr).size()).reversed())
+                                .collect(Collectors.toList());
+
+                        for (String sr : srsByLoad) {
+                            List<Shipment> current = srAssignments.get(sr);
+                            List<Shipment> trial = new ArrayList<>(current);
+                            trial.add(s);
+                            ShiftWorkloadCalculatorService.WorkloadResult w =
+                                    workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
+                            if (w.totalMinutes() < getShiftDurationForSr(sr, srShiftDurations) * overfillTolerance) {
+                                current.add(s);
+                                consolidated.add(s);
+                                placed = true;
+                                break;
+                            }
+                        }
+                        if (!placed) {
+                            unconsolidated.add(s);
+                        }
+                    }
+
+                    if (!unconsolidated.isEmpty()) {
+                        // Consolidation failed for some shipments — mark as unallocated
+                        // Do NOT activate a new SR for this small leftover count
+                        smallLeftoverRegions.add(regionName);
+                        String warning = String.format(
+                                "Region %s: %d leftover shipments (< %d threshold) could not be consolidated — marked as unallocated instead of activating a new SR",
+                                regionName, unconsolidated.size(), leftoverMinThreshold);
+                        operationalWarnings.add(warning);
+                        log.warn("AffinityShiftAllocationService: SMALL LEFTOVER — {}", warning);
+                        // These go directly to trulyUnallocated (handled after Phase 6)
+                        overflowShipments.addAll(unconsolidated);
+                    }
+
+                    if (!consolidated.isEmpty()) {
+                        log.info("AffinityShiftAllocationService: region '{}' — consolidated {} of {} overflow shipments into existing SRs",
+                                regionName, consolidated.size(), overflowCount);
+                    }
+                } else {
+                    log.warn("AffinityShiftAllocationService: region '{}' has {} overflow shipments",
+                            regionName, overflowCount);
+                    overflowShipments.addAll(packResult.overflow());
+                }
             }
         }
 
@@ -191,8 +272,8 @@ public class AffinityShiftAllocationService {
         // If no NON_AFFINITY SRs exist, no-region shipments remain unallocated.
 
         // 6a: Re-assign overflow shipments back to their own region's SRs
-        //     (with 5% overfill tolerance for minimum-manpower goal)
-        double overfillTolerance = 1.05;
+        //     (strict shift duration cap — no overfill allowed)
+        double overfillTolerance = 1.0;
         List<Shipment> trulyUnallocated = new ArrayList<>();
 
         for (Shipment s : overflowShipments) {
@@ -222,7 +303,7 @@ public class AffinityShiftAllocationService {
                 trial.add(s);
                 ShiftWorkloadCalculatorService.WorkloadResult w =
                         workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
-                if (w.totalMinutes() < shiftDurationMinutes * overfillTolerance) {
+                if (w.totalMinutes() < getShiftDurationForSr(sr, srShiftDurations) * overfillTolerance) {
                     current.add(s);
                     placed = true;
                     break;
@@ -240,7 +321,7 @@ public class AffinityShiftAllocationService {
                 .collect(Collectors.toList());
 
         if (!nonAffinitySrs.isEmpty() && !noRegionShipments.isEmpty()) {
-            DensePackResult nonAffinityPack = densePackRegion(noRegionShipments, nonAffinitySrs);
+            DensePackResult nonAffinityPack = densePackRegion(noRegionShipments, nonAffinitySrs, srShiftDurations);
             nonAffinityPack.assignments().forEach((sr, shipments) ->
                     srAssignments.get(sr).addAll(shipments));
             trulyUnallocated.addAll(nonAffinityPack.overflow());
@@ -256,10 +337,11 @@ public class AffinityShiftAllocationService {
         int totalUnallocated = unallocatedByFilter + trulyUnallocated.size();
 
         // ── Phase 6c: Consolidate tiny allocations (minimum manpower) ─────────
-        // If an SR has very few shipments (< 10), merge them into the busiest SR
-        // in the SAME region that can absorb them (within 5% overfill).
-        // This avoids sending an SR out for just 1-2 deliveries.
-        int minShipmentsThreshold = 10;
+        // If an SR has very few shipments (< 10), merge them into another SR
+        // in the SAME region that can absorb them. If no SR can absorb them,
+        // mark the shipments as unallocated rather than sending an SR out for
+        // just a handful of deliveries.
+        int minShipmentsThreshold = leftoverMinThreshold;
 
         for (String sr : new ArrayList<>(presentSrs)) {
             List<Shipment> srShipments = srAssignments.get(sr);
@@ -269,32 +351,62 @@ public class AffinityShiftAllocationService {
             String srRegion = getSrRegion(sr, config);
             if (srRegion == null) continue;
 
-            // Find the busiest SR in the same region that can absorb these shipments
+            // Try to distribute these shipments individually across other SRs in the region
             List<String> regionSrs = getAssignedSrsForRegion(srRegion, config, presentSrs);
-            String bestTarget = regionSrs.stream()
+            List<String> candidateSrs = regionSrs.stream()
                     .filter(candidate -> !candidate.equals(sr))
                     .filter(candidate -> srAssignments.get(candidate) != null
-                            && srAssignments.get(candidate).size() >= minShipmentsThreshold)
-                    .max(Comparator.comparingInt(
-                            candidate -> srAssignments.get(candidate).size()))
-                    .orElse(null);
+                            && !srAssignments.get(candidate).isEmpty())
+                    .sorted(Comparator.comparingInt(
+                            (String candidate) -> srAssignments.get(candidate).size()).reversed())
+                    .collect(Collectors.toList());
 
-            if (bestTarget != null) {
-                List<Shipment> merged = new ArrayList<>(srAssignments.get(bestTarget));
-                merged.addAll(srShipments);
-                ShiftWorkloadCalculatorService.WorkloadResult mergedWorkload =
-                        workloadCalculator.computeWorkload(nearestNeighbourOrder(merged));
+            List<Shipment> placed = new ArrayList<>();
+            List<Shipment> unplaced = new ArrayList<>();
 
-                if (mergedWorkload.totalMinutes() < shiftDurationMinutes * overfillTolerance) {
-                    log.info("AffinityShiftAllocationService: consolidating {} shipments from SR '{}' into SR '{}' (region '{}')",
-                            srShipments.size(), sr, bestTarget, srRegion);
-                    srAssignments.get(bestTarget).addAll(srShipments);
-                    srAssignments.put(sr, new ArrayList<>());
+            for (Shipment s : srShipments) {
+                boolean wasPlaced = false;
+                for (String candidate : candidateSrs) {
+                    List<Shipment> current = srAssignments.get(candidate);
+                    List<Shipment> trial = new ArrayList<>(current);
+                    trial.add(s);
+                    ShiftWorkloadCalculatorService.WorkloadResult w =
+                            workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
+                    if (w.totalMinutes() < getShiftDurationForSr(candidate, srShiftDurations)) {
+                        current.add(s);
+                        placed.add(s);
+                        wasPlaced = true;
+                        break;
+                    }
                 }
+                if (!wasPlaced) {
+                    unplaced.add(s);
+                }
+            }
+
+            if (!placed.isEmpty() || !unplaced.isEmpty()) {
+                log.info("AffinityShiftAllocationService: Phase 6c — SR '{}' had {} shipments (< {} threshold): {} consolidated, {} marked unallocated",
+                        sr, srShipments.size(), minShipmentsThreshold, placed.size(), unplaced.size());
+            }
+
+            // Clear this SR's assignment — shipments are either moved or unallocated
+            srAssignments.put(sr, new ArrayList<>());
+
+            if (!unplaced.isEmpty()) {
+                trulyUnallocated.addAll(unplaced);
+                totalUnallocated += unplaced.size();
+                String warning = String.format(
+                        "SR %s: %d shipments (< %d threshold) could not be consolidated into other SRs in region %s — marked as unallocated",
+                        sr, unplaced.size(), minShipmentsThreshold, srRegion);
+                operationalWarnings.add(warning);
+                log.warn("AffinityShiftAllocationService: SMALL ALLOCATION — {}", warning);
             }
         }
 
-        // ── Phase 7: Route sequencing (nearest-neighbour + 2-opt) ─────────────
+        // ── Phase 7: Route sequencing (strategy-based optimization) ────────────
+        RouteOptimizationStrategy routeStrategy = resolveRouteStrategy();
+        log.info("AffinityShiftAllocationService: Phase 7 — using route optimization strategy: '{}'", routeOptimizerStrategy);
+
         Map<String, List<Shipment>> orderedAssignments = new LinkedHashMap<>();
         for (Map.Entry<String, List<Shipment>> entry : srAssignments.entrySet()) {
             String sr = entry.getKey();
@@ -310,11 +422,8 @@ public class AffinityShiftAllocationService {
                 continue;
             }
 
-            // Nearest-neighbour seed
-            List<Shipment> nnOrdered = nearestNeighbourOrder(srShipments);
-            // 2-opt improvement
-            List<Shipment> optimized = twoOptOptimizer.optimize(
-                    nnOrdered, travelTimeCache, hubLat, hubLng, twoOptMaxIterations);
+            // Use the configured route optimization strategy
+            List<Shipment> optimized = routeStrategy.optimize(srShipments, hubLat, hubLng);
             // Assign route sequences
             for (int i = 0; i < optimized.size(); i++) {
                 optimized.get(i).setRouteSequence(i + 1);
@@ -327,6 +436,282 @@ public class AffinityShiftAllocationService {
         for (Map.Entry<String, List<Shipment>> entry : orderedAssignments.entrySet()) {
             workloadBySr.put(entry.getKey(), workloadCalculator.computeWorkload(entry.getValue()));
         }
+
+        // ── Phase 8b: Earnings balancing pass (per region) ────────────────────
+        // For each region with ≥2 active SRs, invoke EarningsBalancingService to
+        // reduce earnings spread. Shipments may move between SRs within the same
+        // region, so routes need re-sequencing afterward.
+        boolean earningsImbalanceWarning = false;
+
+        // Group SR assignments by region
+        Map<String, Map<String, List<Shipment>>> regionSrAssignments = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Shipment>> entry : orderedAssignments.entrySet()) {
+            String sr = entry.getKey();
+            if (entry.getValue().isEmpty()) continue;
+            String srRegion = getSrRegion(sr, config);
+            if (srRegion == null) continue;
+            regionSrAssignments
+                    .computeIfAbsent(srRegion, k -> new LinkedHashMap<>())
+                    .put(sr, entry.getValue());
+        }
+
+        for (Map.Entry<String, Map<String, List<Shipment>>> regionEntry : regionSrAssignments.entrySet()) {
+            String regionName = regionEntry.getKey();
+            Map<String, List<Shipment>> regionAssignments = regionEntry.getValue();
+
+            // Only balance regions with ≥2 active SRs
+            long activeSrCount = regionAssignments.values().stream()
+                    .filter(shipments -> !shipments.isEmpty())
+                    .count();
+            if (activeSrCount < 2) continue;
+
+            log.info("AffinityShiftAllocationService: Phase 8b — earnings balancing for region '{}' ({} active SRs)",
+                    regionName, activeSrCount);
+
+            EarningsBalancingService.BalancingResult balancingResult =
+                    earningsBalancingService.balance(regionAssignments, srShiftDurations, shiftDurationMinutes);
+
+            if (balancingResult.earningsImbalanceWarning()) {
+                earningsImbalanceWarning = true;
+                log.warn("AffinityShiftAllocationService: Phase 8b — earnings imbalance detected in region '{}'", regionName);
+            }
+
+            // Update orderedAssignments with balanced assignments and re-sequence routes
+            RouteOptimizationStrategy routeStrategyForResequence = resolveRouteStrategy();
+            for (Map.Entry<String, List<Shipment>> srEntry : balancingResult.srAssignments().entrySet()) {
+                String sr = srEntry.getKey();
+                List<Shipment> balancedShipments = srEntry.getValue();
+
+                if (balancedShipments.isEmpty()) {
+                    orderedAssignments.put(sr, balancedShipments);
+                    continue;
+                }
+                if (balancedShipments.size() == 1) {
+                    balancedShipments.get(0).setRouteSequence(1);
+                    orderedAssignments.put(sr, balancedShipments);
+                    continue;
+                }
+
+                // Re-sequence routes since shipments may have moved between SRs
+                List<Shipment> reOptimized = routeStrategyForResequence.optimize(balancedShipments, hubLat, hubLng);
+                for (int i = 0; i < reOptimized.size(); i++) {
+                    reOptimized.get(i).setRouteSequence(i + 1);
+                }
+                orderedAssignments.put(sr, reOptimized);
+            }
+        }
+
+        // Recompute workload metrics after earnings balancing (routes may have changed)
+        if (earningsImbalanceWarning || !regionSrAssignments.isEmpty()) {
+            for (Map.Entry<String, List<Shipment>> entry : orderedAssignments.entrySet()) {
+                workloadBySr.put(entry.getKey(), workloadCalculator.computeWorkload(entry.getValue()));
+            }
+        }
+
+        // ── Phase 8a-enforce: Workload enforcement pass ───────────────────────
+        // After route optimization (Phase 7) and earnings balancing (Phase 8b),
+        // the final route order may differ from what was estimated during dense
+        // packing. This pass ensures NO SR exceeds shiftDurationMinutes by
+        // shedding the last shipments (furthest from hub in route order) until
+        // the workload fits within the shift.
+        List<Shipment> shedShipments = new ArrayList<>();
+        for (Map.Entry<String, List<Shipment>> entry : orderedAssignments.entrySet()) {
+            String sr = entry.getKey();
+            List<Shipment> route = entry.getValue();
+            if (route.isEmpty()) continue;
+
+            ShiftWorkloadCalculatorService.WorkloadResult w = workloadBySr.get(sr);
+            if (w == null) continue;
+
+            // Shed shipments from the end of the route until workload fits
+            while (w.totalMinutes() >= getShiftDurationForSr(sr, srShiftDurations) && route.size() > 1) {
+                Shipment removed = route.remove(route.size() - 1);
+                shedShipments.add(removed);
+                w = workloadCalculator.computeWorkload(route);
+                workloadBySr.put(sr, w);
+            }
+        }
+
+        // Try to place shed shipments into SRs that still have capacity
+        if (!shedShipments.isEmpty()) {
+            log.info("AffinityShiftAllocationService: Phase 8a-enforce — shed {} shipments from overloaded SRs, attempting redistribution",
+                    shedShipments.size());
+
+            List<Shipment> unplacedShed = new ArrayList<>();
+            RouteOptimizationStrategy shedRouteStrategy = resolveRouteStrategy();
+
+            for (Shipment s : shedShipments) {
+                boolean placed = false;
+                // Find SRs in the same region with remaining capacity
+                String shipmentRegion = findRegionForShipment(s, config);
+                List<String> candidateSrs = shipmentRegion != null
+                        ? getAssignedSrsForRegion(shipmentRegion, config, presentSrs)
+                        : new ArrayList<>(orderedAssignments.keySet());
+
+                // Sort by current workload ascending (prefer least-loaded SR)
+                candidateSrs.sort(Comparator.comparingDouble(sr -> {
+                    ShiftWorkloadCalculatorService.WorkloadResult wl = workloadBySr.get(sr);
+                    return wl != null ? wl.totalMinutes() : Double.MAX_VALUE;
+                }));
+
+                for (String sr : candidateSrs) {
+                    List<Shipment> route = orderedAssignments.get(sr);
+                    if (route == null) continue;
+
+                    List<Shipment> trial = new ArrayList<>(route);
+                    trial.add(s);
+                    // Re-optimize the trial route
+                    List<Shipment> optimizedTrial = trial.size() > 2
+                            ? shedRouteStrategy.optimize(trial, hubLat, hubLng)
+                            : trial;
+                    ShiftWorkloadCalculatorService.WorkloadResult trialW =
+                            workloadCalculator.computeWorkload(optimizedTrial);
+
+                    if (trialW.totalMinutes() < getShiftDurationForSr(sr, srShiftDurations)) {
+                        // Fits — update the route
+                        for (int i = 0; i < optimizedTrial.size(); i++) {
+                            optimizedTrial.get(i).setRouteSequence(i + 1);
+                        }
+                        orderedAssignments.put(sr, optimizedTrial);
+                        workloadBySr.put(sr, trialW);
+                        placed = true;
+                        break;
+                    }
+                }
+
+                if (!placed) {
+                    unplacedShed.add(s);
+                }
+            }
+
+            if (!unplacedShed.isEmpty()) {
+                log.warn("AffinityShiftAllocationService: Phase 8a-enforce — {} shed shipments could not be placed, marking as unallocated",
+                        unplacedShed.size());
+                totalUnallocated += unplacedShed.size();
+            }
+
+            // Recompute workload after enforcement
+            for (Map.Entry<String, List<Shipment>> entry : orderedAssignments.entrySet()) {
+                workloadBySr.put(entry.getKey(), workloadCalculator.computeWorkload(entry.getValue()));
+            }
+        }
+
+        log.info("AffinityShiftAllocationService: Phase 8b complete — earningsImbalanceWarning={}", earningsImbalanceWarning);
+
+        // ── Phase 8a-consolidate: Final tiny-allocation cleanup ───────────────
+        // After Phase 8a-enforce, some SRs may have received shed shipments but
+        // still have fewer than the minimum threshold. Consolidate them into other
+        // SRs in the same region, or mark as unallocated.
+        for (String sr : new ArrayList<>(orderedAssignments.keySet())) {
+            List<Shipment> route = orderedAssignments.get(sr);
+            if (route == null || route.isEmpty()) continue;
+            if (route.size() >= leftoverMinThreshold) continue;
+
+            String srRegion = getSrRegion(sr, config);
+            if (srRegion == null) continue;
+
+            // Try to distribute these shipments individually across other SRs in the region
+            List<String> regionSrs = getAssignedSrsForRegion(srRegion, config, presentSrs);
+            List<String> candidateSrs = regionSrs.stream()
+                    .filter(candidate -> !candidate.equals(sr))
+                    .filter(candidate -> orderedAssignments.get(candidate) != null
+                            && orderedAssignments.get(candidate).size() >= leftoverMinThreshold)
+                    .sorted(Comparator.comparingDouble(candidate -> {
+                        ShiftWorkloadCalculatorService.WorkloadResult wl = workloadBySr.get(candidate);
+                        return wl != null ? wl.totalMinutes() : Double.MAX_VALUE;
+                    }))
+                    .collect(Collectors.toList());
+
+            RouteOptimizationStrategy consolidateStrategy = resolveRouteStrategy();
+            List<Shipment> placed = new ArrayList<>();
+            List<Shipment> unplaced = new ArrayList<>();
+
+            for (Shipment s : route) {
+                boolean wasPlaced = false;
+                for (String candidate : candidateSrs) {
+                    List<Shipment> candidateRoute = orderedAssignments.get(candidate);
+                    List<Shipment> trial = new ArrayList<>(candidateRoute);
+                    trial.add(s);
+                    List<Shipment> optimizedTrial = trial.size() > 2
+                            ? consolidateStrategy.optimize(trial, hubLat, hubLng)
+                            : trial;
+                    ShiftWorkloadCalculatorService.WorkloadResult w =
+                            workloadCalculator.computeWorkload(optimizedTrial);
+                    if (w.totalMinutes() < getShiftDurationForSr(candidate, srShiftDurations)) {
+                        for (int i = 0; i < optimizedTrial.size(); i++) {
+                            optimizedTrial.get(i).setRouteSequence(i + 1);
+                        }
+                        orderedAssignments.put(candidate, optimizedTrial);
+                        workloadBySr.put(candidate, w);
+                        placed.add(s);
+                        wasPlaced = true;
+                        break;
+                    }
+                }
+                if (!wasPlaced) {
+                    unplaced.add(s);
+                }
+            }
+
+            // Clear this SR
+            orderedAssignments.put(sr, new ArrayList<>());
+            workloadBySr.put(sr, new ShiftWorkloadCalculatorService.WorkloadResult(0, 0, 0, 0));
+
+            if (!placed.isEmpty() || !unplaced.isEmpty()) {
+                log.info("AffinityShiftAllocationService: Phase 8a-consolidate — SR '{}' had {} shipments (< {} threshold): {} redistributed, {} marked unallocated",
+                        sr, placed.size() + unplaced.size(), leftoverMinThreshold, placed.size(), unplaced.size());
+            }
+
+            if (!unplaced.isEmpty()) {
+                totalUnallocated += unplaced.size();
+                String warning = String.format(
+                        "SR %s: %d shipments (< %d threshold) could not be consolidated after enforcement — marked as unallocated",
+                        sr, unplaced.size(), leftoverMinThreshold);
+                operationalWarnings.add(warning);
+            }
+        }
+
+        // ── Phase 8c: Region load classification ──────────────────────────────
+        // Classify each region's health status based on utilisation metrics:
+        //   UNDERLOADED: avg utilisation < 50%
+        //   HEALTHY:     avg utilisation 50-90%
+        //   OVERLOADED:  avg utilisation > 90% OR overflow > 0
+        // This pre-computes classifications so they are available for operational
+        // decisions and the allocation summary.
+        Map<String, String> regionHealthClassifications = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Shipment>> regionEntry : regionShipments.entrySet()) {
+            String regionName = regionEntry.getKey();
+            List<String> regionSrNames = getAssignedSrsForRegion(regionName, config, presentSrs);
+
+            // Compute utilisation stats for this region's SRs
+            List<Double> regionUtilisations = new ArrayList<>();
+            for (String sr : regionSrNames) {
+                ShiftWorkloadCalculatorService.WorkloadResult w =
+                        workloadBySr.getOrDefault(sr, new ShiftWorkloadCalculatorService.WorkloadResult(0, 0, 0, 0));
+                int srDuration = getShiftDurationForSr(sr, srShiftDurations);
+                double utilisationPct = srDuration > 0
+                        ? Math.round((w.totalMinutes() / srDuration) * 1000.0) / 10.0
+                        : 0.0;
+                regionUtilisations.add(utilisationPct);
+            }
+
+            double avgUtil = regionUtilisations.isEmpty() ? 0.0
+                    : regionUtilisations.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+
+            // Compute overflow for this region
+            int regionAllocated = regionSrNames.stream()
+                    .mapToInt(sr -> orderedAssignments.getOrDefault(sr, Collections.emptyList()).size())
+                    .sum();
+            int regionOverflow = Math.max(0, regionEntry.getValue().size() - regionAllocated);
+
+            String healthStatus = RegionSummaryDto.computeHealthStatus(regionOverflow, 0, avgUtil);
+            regionHealthClassifications.put(regionName, healthStatus);
+
+            log.info("AffinityShiftAllocationService: Phase 8c — region '{}' classified as {} (avgUtil={}%, overflow={})",
+                    regionName, healthStatus, Math.round(avgUtil * 10.0) / 10.0, regionOverflow);
+        }
+
+        log.info("AffinityShiftAllocationService: Phase 8c complete — {} regions classified", regionHealthClassifications.size());
 
         // ── Phase 9: Persist to InMemoryStore ─────────────────────────────────
         Set<String> allocatedIds = new HashSet<>();
@@ -373,7 +758,8 @@ public class AffinityShiftAllocationService {
         // ── Phase 10: Build AllocationSummary ─────────────────────────────────
         return buildSummary(dateStr, allShipments, presentSrs, orderedAssignments,
                 workloadBySr, srAffinityStatus, allocatedIds.size(), totalUnallocated,
-                overflowShipments.size(), noRegionShipments.size(), config, regionShipments);
+                overflowShipments.size(), noRegionShipments.size(), config, regionShipments,
+                operationalWarnings, smallLeftoverRegions, earningsImbalanceWarning, srShiftDurations);
     }
 
     // =========================================================================
@@ -561,10 +947,14 @@ public class AffinityShiftAllocationService {
             String pincode = s.getDropPincode();
             boolean assigned = false;
 
-            // Pass 1: pincode match
-            if (pincode != null) {
-                for (Map.Entry<String, Set<String>> entry : regionPincodes.entrySet()) {
-                    if (entry.getValue().contains(pincode)) {
+            // Pass 1 (PRIMARY): Coordinate match against region polygon
+            // Direct lat/lng containment is more accurate than pincode centroid matching
+            // because a pincode covers a large area and its centroid may be in a different
+            // region than the actual shipment location.
+            if (!regionPolygons.isEmpty()
+                    && s.getDropLatitude() != 0 && s.getDropLongitude() != 0) {
+                for (Map.Entry<String, List<double[]>> entry : regionPolygons.entrySet()) {
+                    if (isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), entry.getValue())) {
                         result.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(s);
                         assigned = true;
                         break;
@@ -572,10 +962,10 @@ public class AffinityShiftAllocationService {
                 }
             }
 
-            // Pass 2: coordinate match against region polygon (fallback)
-            if (!assigned && !regionPolygons.isEmpty()) {
-                for (Map.Entry<String, List<double[]>> entry : regionPolygons.entrySet()) {
-                    if (isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), entry.getValue())) {
+            // Pass 2 (FALLBACK): Pincode match — only when coordinates are missing/invalid
+            if (!assigned && pincode != null) {
+                for (Map.Entry<String, Set<String>> entry : regionPincodes.entrySet()) {
+                    if (entry.getValue().contains(pincode)) {
                         result.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(s);
                         assigned = true;
                         break;
@@ -591,7 +981,7 @@ public class AffinityShiftAllocationService {
     }
 
     /**
-     * Dense-pack shipments into SRs one by one up to shiftDurationMinutes.
+     * Dense-pack shipments into SRs using per-SR shift durations.
      *
      * <p>Strategy:
      * <ol>
@@ -604,9 +994,13 @@ public class AffinityShiftAllocationService {
      * <p>This produces much better route stitching than per-shipment greedy packing
      * because shipments in the same pincode area stay together.
      *
+     * @param regionShipments  shipments to pack into the SRs
+     * @param assignedSrs      ordered list of SRs to fill
+     * @param srShiftDurations per-SR shift duration overrides (empty map uses global default)
      * @return assignments per SR and overflow list
      */
-    public DensePackResult densePackRegion(List<Shipment> regionShipments, List<String> assignedSrs) {
+    public DensePackResult densePackRegion(List<Shipment> regionShipments, List<String> assignedSrs,
+                                             Map<String, Integer> srShiftDurations) {
         Map<String, List<Shipment>> assignments = new LinkedHashMap<>();
         for (String sr : assignedSrs) assignments.put(sr, new ArrayList<>());
 
@@ -632,7 +1026,6 @@ public class AffinityShiftAllocationService {
         // Target utilisation (default 88%) is configured via property
         // allocation.shift.target.utilisation. The 12% buffer accounts for
         // real-world travel variance that causes routes to exceed 8 hours.
-        double targetMinutes = shiftDurationMinutes * targetUtilisation;
 
         List<Shipment> overflow = new ArrayList<>();
         int srIdx = 0;
@@ -640,6 +1033,8 @@ public class AffinityShiftAllocationService {
 
         while (groupIdx < orderedGroups.size() && srIdx < assignedSrs.size()) {
             String currentSr = assignedSrs.get(srIdx);
+            int currentSrShiftDuration = getShiftDurationForSr(currentSr, srShiftDurations);
+            double targetMinutes = currentSrShiftDuration * targetUtilisation;
             List<Shipment> currentRoute = assignments.get(currentSr);
             List<Shipment> group = orderedGroups.get(groupIdx);
 
@@ -649,7 +1044,7 @@ public class AffinityShiftAllocationService {
             ShiftWorkloadCalculatorService.WorkloadResult workload =
                     workloadCalculator.computeWorkload(nearestNeighbourOrder(candidateRoute));
 
-            if (workload.totalMinutes() < shiftDurationMinutes) {
+            if (workload.totalMinutes() < currentSrShiftDuration) {
                 // Group fits — add it
                 currentRoute.addAll(group);
                 groupIdx++;
@@ -666,7 +1061,7 @@ public class AffinityShiftAllocationService {
                     trial.add(s);
                     ShiftWorkloadCalculatorService.WorkloadResult w =
                             workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
-                    if (w.totalMinutes() < shiftDurationMinutes) {
+                    if (w.totalMinutes() < currentSrShiftDuration) {
                         currentRoute.add(s);
                     } else {
                         overflow.add(s);
@@ -675,7 +1070,24 @@ public class AffinityShiftAllocationService {
                 groupIdx++;
                 srIdx++;
             } else {
-                // Current SR is full — move to next SR and retry this group
+                // Current SR is full — check if remaining shipments are below the
+                // small leftover threshold before activating the next SR
+                int remainingShipments = 0;
+                for (int g = groupIdx; g < orderedGroups.size(); g++) {
+                    remainingShipments += orderedGroups.get(g).size();
+                }
+
+                if (remainingShipments < leftoverMinThreshold && !currentRoute.isEmpty()) {
+                    // Small leftover: don't activate a new SR, send remaining to overflow
+                    log.info("AffinityShiftAllocationService: densePackRegion — {} remaining shipments < threshold {}, not activating next SR",
+                            remainingShipments, leftoverMinThreshold);
+                    while (groupIdx < orderedGroups.size()) {
+                        overflow.addAll(orderedGroups.get(groupIdx++));
+                    }
+                    break;
+                }
+
+                // Normal case: move to next SR and retry this group
                 srIdx++;
             }
         }
@@ -697,12 +1109,13 @@ public class AffinityShiftAllocationService {
                                 (String sr) -> assignments.get(sr).size()).reversed())
                         .collect(Collectors.toList());
                 for (String sr : srsByLoad) {
+                    int srShiftDuration = getShiftDurationForSr(sr, srShiftDurations);
                     List<Shipment> route = assignments.get(sr);
                     List<Shipment> trial = new ArrayList<>(route);
                     trial.add(s);
                     ShiftWorkloadCalculatorService.WorkloadResult w =
                             workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
-                    if (w.totalMinutes() < shiftDurationMinutes) {
+                    if (w.totalMinutes() < srShiftDuration) {
                         route.add(s);
                         placed = true;
                         break;
@@ -723,6 +1136,14 @@ public class AffinityShiftAllocationService {
         }
 
         return new DensePackResult(assignments, overflow);
+    }
+
+    /**
+     * Backward-compatible overload that uses the global shift duration for all SRs.
+     * Delegates to {@link #densePackRegion(List, List, Map)} with an empty map.
+     */
+    public DensePackResult densePackRegion(List<Shipment> regionShipments, List<String> assignedSrs) {
+        return densePackRegion(regionShipments, assignedSrs, Collections.emptyMap());
     }
 
     /**
@@ -792,6 +1213,20 @@ public class AffinityShiftAllocationService {
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /**
+     * Resolve the active route optimization strategy based on the
+     * {@code allocation.route.optimizer.strategy} configuration property.
+     *
+     * @return the selected RouteOptimizationStrategy implementation
+     */
+    private RouteOptimizationStrategy resolveRouteStrategy() {
+        if ("legacy".equalsIgnoreCase(routeOptimizerStrategy)) {
+            return legacyRouteOptimizer;
+        }
+        // Default: "cluster-first" (also handles any unrecognized value)
+        return clusterFirstRouteOptimizer;
+    }
 
     /**
      * Normalize a region name for fuzzy matching.
@@ -932,7 +1367,11 @@ public class AffinityShiftAllocationService {
                                             int overflowCount,
                                             int noRegionCount,
                                             Map<String, Object> config,
-                                            Map<String, List<Shipment>> regionShipments) {
+                                            Map<String, List<Shipment>> regionShipments,
+                                            List<String> operationalWarnings,
+                                            Set<String> smallLeftoverRegions,
+                                            boolean earningsImbalanceWarning,
+                                            Map<String, Integer> srShiftDurations) {
         List<SrSummaryDto> srSummaries = new ArrayList<>();
         int minShipments = Integer.MAX_VALUE, maxShipments = 0;
         long totalShipments = 0;
@@ -962,10 +1401,33 @@ public class AffinityShiftAllocationService {
 
             int heavyCount = (int) srShipments.stream().filter(s -> s.getIsHeavy() == 1).count();
 
-            double utilisationPct = shiftDurationMinutes > 0
-                    ? Math.round((workload.totalMinutes() / shiftDurationMinutes) * 1000.0) / 10.0
+            int srShiftDuration = getShiftDurationForSr(sr, srShiftDurations);
+            double utilisationPct = srShiftDuration > 0
+                    ? Math.round((workload.totalMinutes() / srShiftDuration) * 1000.0) / 10.0
                     : 0.0;
             utilisationBySr.put(sr, utilisationPct);
+
+            // ── Phase 8d: Determine operational warning for this SR ───────────
+            String srWarning = null;
+            if (utilisationPct > 100.0) {
+                srWarning = "OVERLOADED";
+                String warningMsg = String.format("SR %s is OVERLOADED (utilization: %.0f%%)", sr, utilisationPct);
+                operationalWarnings.add(warningMsg);
+                log.warn("AffinityShiftAllocationService: OPERATIONAL WARNING — {}", warningMsg);
+            } else if (utilisationPct == 0.0) {
+                // Check if this SR's region has shipments (idle only if region has work)
+                String srRegion = getSrRegion(sr, config);
+                if (srRegion != null) {
+                    List<Shipment> regionShips = regionShipments.getOrDefault(srRegion, Collections.emptyList());
+                    if (!regionShips.isEmpty()) {
+                        srWarning = "IDLE";
+                        String warningMsg = String.format("SR %s is IDLE (utilization: 0%%) in region %s with %d shipments",
+                                sr, srRegion, regionShips.size());
+                        operationalWarnings.add(warningMsg);
+                        log.warn("AffinityShiftAllocationService: OPERATIONAL WARNING — {}", warningMsg);
+                    }
+                }
+            }
 
             srSummaries.add(new SrSummaryDto(
                     sr, count, heavyCount, 0.0, distKm, pincodes,
@@ -975,7 +1437,8 @@ public class AffinityShiftAllocationService {
                     utilisationPct,
                     workload.handlingMinutes(),
                     workload.travelMinutes(),
-                    workload.returnToHubMinutes()
+                    workload.returnToHubMinutes(),
+                    srWarning
             ));
         }
 
@@ -984,10 +1447,11 @@ public class AffinityShiftAllocationService {
 
         // ── Build per-region summaries ─────────────────────────────────────────
         List<RegionSummaryDto> regionSummaryList = buildRegionSummaries(
-                config, presentSrs, orderedAssignments, utilisationBySr, regionShipments);
+                config, presentSrs, orderedAssignments, utilisationBySr, regionShipments,
+                smallLeftoverRegions);
 
         // ── Compute rebalancing suggestions ───────────────────────────────────
-        List<SrRebalanceSuggestion> allSuggestions = computeRebalanceSuggestions(regionSummaryList);
+        List<SrRebalanceSuggestion> allSuggestions = computeRebalanceSuggestions(regionSummaryList, utilisationBySr);
         // Attach suggestions to the relevant region summaries
         Map<String, List<SrRebalanceSuggestion>> suggestionsByToRegion = allSuggestions.stream()
                 .collect(Collectors.groupingBy(SrRebalanceSuggestion::toRegion));
@@ -998,9 +1462,31 @@ public class AffinityShiftAllocationService {
                     rs.overflowShipments(), rs.assignedSrCount(), rs.activeSrCount(),
                     rs.idleSrCount(), rs.assignedSrNames(), rs.activeSrNames(), rs.idleSrNames(),
                     rs.avgUtilisationPct(), rs.maxUtilisationPct(), rs.minUtilisationPct(),
-                    rs.healthStatus(), regionSuggestions
+                    rs.healthStatus(), regionSuggestions, rs.configurationWarnings(),
+                    rs.smallLeftoverWarning()
             );
         }).collect(Collectors.toList());
+
+        // ── Compute earnings metrics from per-SR summaries ──────────────────
+        final double meanNetEarnings;
+        final double earningsRange;
+        final double earningsVariance;
+        if (!srSummaries.isEmpty()) {
+            double sumEarnings = srSummaries.stream().mapToDouble(SrSummaryDto::netEarnings).sum();
+            meanNetEarnings = sumEarnings / srSummaries.size();
+            double maxEarnings = srSummaries.stream().mapToDouble(SrSummaryDto::netEarnings).max().orElse(0.0);
+            double minEarnings = srSummaries.stream().mapToDouble(SrSummaryDto::netEarnings).min().orElse(0.0);
+            earningsRange = maxEarnings - minEarnings;
+            final double mean = meanNetEarnings;
+            double sumSquaredDiff = srSummaries.stream()
+                    .mapToDouble(s -> Math.pow(s.netEarnings() - mean, 2))
+                    .sum();
+            earningsVariance = sumSquaredDiff / srSummaries.size();
+        } else {
+            meanNetEarnings = 0.0;
+            earningsRange = 0.0;
+            earningsVariance = 0.0;
+        }
 
         return new AllocationSummary(
                 dateStr,
@@ -1014,12 +1500,14 @@ public class AffinityShiftAllocationService {
                 avgShipments,
                 0.0,
                 srSummaries,
-                0.0, 0.0, 0.0,
+                earningsVariance, earningsRange, meanNetEarnings,
                 "time-based",
                 shiftDurationMinutes,
                 overflowCount,
                 noRegionCount,
-                regionSummaryList
+                regionSummaryList,
+                operationalWarnings,
+                earningsImbalanceWarning
         );
     }
 
@@ -1032,7 +1520,8 @@ public class AffinityShiftAllocationService {
             List<String> presentSrs,
             Map<String, List<Shipment>> orderedAssignments,
             Map<String, Double> utilisationBySr,
-            Map<String, List<Shipment>> regionShipments) {
+            Map<String, List<Shipment>> regionShipments,
+            Set<String> smallLeftoverRegions) {
 
         if (config == null) return Collections.emptyList();
         List<Map<String, Object>> regions = (List<Map<String, Object>>) config.get("regions");
@@ -1049,13 +1538,24 @@ public class AffinityShiftAllocationService {
 
             // Shipments in this region
             List<Shipment> regionShips = regionShipments.getOrDefault(regionName, Collections.emptyList());
-            int totalInRegion = regionShips.size();
 
-            // Allocated vs overflow
+            // Allocated count
             int allocated = assignedSrs.stream()
                     .mapToInt(sr -> orderedAssignments.getOrDefault(sr, Collections.emptyList()).size())
                     .sum();
-            int overflow = Math.max(0, totalInRegion - allocated);
+
+            // Total = max of original partition count and actual allocated (handles overflow redistribution)
+            int totalInRegion = Math.max(regionShips.size(), allocated);
+
+            // Overflow = only when original partition exceeds allocated (not negative)
+            int overflow = Math.max(0, regionShips.size() - allocated);
+
+            // Configuration warnings for this region
+            List<String> regionWarnings = new ArrayList<>();
+            if (assignedSrs.isEmpty() && totalInRegion > 0) {
+                regionWarnings.add(String.format("Region %s has %d shipments but no assigned SRs",
+                        regionName, totalInRegion));
+            }
 
             // Active vs idle SRs
             List<String> activeSrs = assignedSrs.stream()
@@ -1078,6 +1578,8 @@ public class AffinityShiftAllocationService {
 
             String healthStatus = RegionSummaryDto.computeHealthStatus(overflow, idleSrs.size(), avgUtil);
 
+            Boolean smallLeftoverWarning = smallLeftoverRegions.contains(regionName) ? Boolean.TRUE : null;
+
             result.add(new RegionSummaryDto(
                     regionName, totalInRegion, allocated, overflow,
                     assignedSrs.size(), activeSrs.size(), idleSrs.size(),
@@ -1086,7 +1588,9 @@ public class AffinityShiftAllocationService {
                     Math.round(maxUtil * 10.0) / 10.0,
                     Math.round(minUtil * 10.0) / 10.0,
                     healthStatus,
-                    Collections.emptyList() // suggestions added later
+                    Collections.emptyList(), // suggestions added later
+                    regionWarnings,
+                    smallLeftoverWarning
             ));
         }
         return result;
@@ -1101,7 +1605,7 @@ public class AffinityShiftAllocationService {
      * - Suggest moving idle/underloaded SRs to overflow regions
      * - Prioritise: idle SRs first (HIGH), then underloaded (MEDIUM)
      */
-    private List<SrRebalanceSuggestion> computeRebalanceSuggestions(List<RegionSummaryDto> regionSummaries) {
+    private List<SrRebalanceSuggestion> computeRebalanceSuggestions(List<RegionSummaryDto> regionSummaries, Map<String, Double> utilisationBySr) {
         List<SrRebalanceSuggestion> suggestions = new ArrayList<>();
 
         List<RegionSummaryDto> overflowRegions = regionSummaries.stream()
@@ -1137,25 +1641,35 @@ public class AffinityShiftAllocationService {
 
             // Underloaded SRs (< 50% utilisation, but not idle) — MEDIUM priority
             if ("UNDERLOADED".equals(sourceRegion.healthStatus())) {
+                if (sourceRegion.activeSrCount() <= 1) continue;
+
+                // Find the least utilized active SR in this region
+                String leastUtilizedSr = null;
+                double leastUtil = Double.MAX_VALUE;
                 for (String activeSr : sourceRegion.activeSrNames()) {
-                    // Only suggest if this region has multiple active SRs (so removing one doesn't hurt)
-                    if (sourceRegion.activeSrCount() <= 1) continue;
+                    double srUtil = utilisationBySr.getOrDefault(activeSr, 0.0);
+                    if (srUtil < leastUtil) {
+                        leastUtil = srUtil;
+                        leastUtilizedSr = activeSr;
+                    }
+                }
+
+                // Only suggest if the least utilized SR is actually underloaded (< 50%)
+                if (leastUtilizedSr != null && leastUtil < 50.0) {
                     RegionSummaryDto bestTarget = overflowRegions.stream()
                             .filter(r -> !r.regionName().equals(sourceRegion.regionName()))
                             .findFirst().orElse(null);
                     if (bestTarget != null) {
-                        double srUtil = sourceRegion.avgUtilisationPct();
                         underloadedSuggestions.add(new SrRebalanceSuggestion(
-                                activeSr,
+                                leastUtilizedSr,
                                 sourceRegion.regionName(),
                                 bestTarget.regionName(),
-                                String.format("SR '%s' is underloaded (%.1f%% avg utilisation) in %s. Moving to %s could help allocate %d overflow shipments.",
-                                        activeSr, srUtil, sourceRegion.regionName(), bestTarget.regionName(), bestTarget.overflowShipments()),
-                                srUtil,
+                                String.format("SR '%s' is underloaded (%.1f%% utilisation) in %s. Moving to %s could help allocate %d overflow shipments.",
+                                        leastUtilizedSr, leastUtil, sourceRegion.regionName(), bestTarget.regionName(), bestTarget.overflowShipments()),
+                                leastUtil,
                                 bestTarget.overflowShipments(),
                                 "MEDIUM"
                         ));
-                        break; // only suggest one SR per underloaded region
                     }
                 }
             }
@@ -1214,6 +1728,62 @@ public class AffinityShiftAllocationService {
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
                 * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // =========================================================================
+    // Per-SR Shift Duration Support
+    // =========================================================================
+
+    /**
+     * Extract the per-SR shift duration map from the affinity config.
+     *
+     * <p>The {@code srShiftDurations} field is stored alongside {@code srZoneMap} and
+     * {@code regions} in the affinity config JSON. Each entry maps an SR name to its
+     * configured shift duration in minutes (e.g., {@code {"SR-001": 480, "SR-005": 600}}).
+     *
+     * <p>When the field is absent or null in the config, returns an empty map — all SRs
+     * fall back to the global {@code allocation.shift.duration.minutes} default.
+     *
+     * @param config the affinity config map loaded from disk
+     * @return a non-null map of SR name → shift duration in minutes (empty if not configured)
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Integer> extractSrShiftDurations(Map<String, Object> config) {
+        if (config == null) {
+            return Collections.emptyMap();
+        }
+        Object raw = config.get("srShiftDurations");
+        if (raw == null) {
+            return Collections.emptyMap();
+        }
+        if (raw instanceof Map) {
+            Map<String, Object> rawMap = (Map<String, Object>) raw;
+            Map<String, Integer> result = new HashMap<>();
+            for (Map.Entry<String, Object> entry : rawMap.entrySet()) {
+                if (entry.getValue() instanceof Number) {
+                    result.put(entry.getKey(), ((Number) entry.getValue()).intValue());
+                }
+            }
+            return result;
+        }
+        return Collections.emptyMap();
+    }
+
+    /**
+     * Returns the shift duration for a specific SR. If the SR has a configured
+     * duration in the provided map, that value is returned. Otherwise, falls back
+     * to the global {@code shiftDurationMinutes} field.
+     *
+     * @param srName           the SR name to look up
+     * @param srShiftDurations per-SR shift duration map (may be null or empty)
+     * @return the shift duration in minutes for the given SR
+     */
+    private int getShiftDurationForSr(String srName, Map<String, Integer> srShiftDurations) {
+        if (srShiftDurations == null || srShiftDurations.isEmpty()) {
+            return shiftDurationMinutes;
+        }
+        Integer duration = srShiftDurations.get(srName);
+        return duration != null ? duration : shiftDurationMinutes;
     }
 
     // =========================================================================

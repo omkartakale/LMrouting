@@ -240,6 +240,9 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .suggestion-card.low{background:#e3f2fd;border-color:#90caf9}
 .suggestion-header{font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:5px}
 .suggestion-action{color:#495057;line-height:1.4}
+.sr-shift-input{width:55px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;text-align:center;flex-shrink:0}
+#save-shift-durations-btn{display:none;margin-top:8px;width:100%;padding:6px 10px;font-size:.76rem;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:#ff8f00;color:#fff;transition:background .15s}
+#save-shift-durations-btn:hover{background:#ff6f00}
   </style>
 </head>
 <body>
@@ -397,6 +400,7 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
         <button class="btn btn-primary" style="font-size:.76rem;white-space:nowrap" onclick="addNewSr()">+ Add SR</button>
       </div>
       <div id="attendance-list"><div class="empty-text">Select a date to load attendance</div></div>
+      <button id="save-shift-durations-btn" onclick="saveSrShiftDurations()">💾 Save Shift Durations</button>
       <div id="sr-zone-save-row" style="display:none;margin-top:8px">
         <button class="btn btn-primary" style="width:100%;font-size:.76rem" onclick="saveRegionsToStorage();showSrZoneSaved()">💾 Save SR Zone Assignments</button>
         <div id="sr-zone-saved-msg" style="display:none;font-size:.72rem;color:#2e7d32;text-align:center;margin-top:4px">✅ SR zone assignments saved</div>
@@ -1534,8 +1538,10 @@ function renderAttendance(attendees) {
   });
 
   var h = '';
+  var isTimeBased = getAllocationMode() === 'time-based';
   attendees.forEach(function(a) {
     var assignedZone = srZoneMap[a.srName] || '';
+    var shiftVal = srShiftDurations[a.srName] || 600;
     h += '<div class="sr-attendance-item" style="flex-wrap:wrap;gap:4px">';
     h += '<span style="min-width:60px;font-weight:600">' + esc(a.srName) + '</span>';
     if (hasZones) {
@@ -1544,6 +1550,9 @@ function renderAttendance(attendees) {
       h += zoneOptions;
       h += '</select>';
     }
+    h += '<input type="number" class="sr-shift-input" data-sr-shift="' + esc(a.srName) + '" min="120" max="720" step="30" value="' + shiftVal + '"'
+      + ' style="width:55px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;text-align:center'
+      + (isTimeBased ? '' : ';display:none') + '" title="Shift duration (min)"/>';
     h += '<label class="toggle-switch" style="flex-shrink:0"><input type="checkbox" '
       + (a.present ? 'checked' : '') + ' '
       + (allocationFinalized ? 'disabled' : '')
@@ -1597,6 +1606,51 @@ function markNonePresent() {
   cbs.forEach(function(cb) { if (cb.checked) { cb.checked = false; ps.push(fetch('/api/attendance/' + encodeURIComponent(date) + '/' + encodeURIComponent(cb.getAttribute('data-sr')) + '?present=false', { method: 'PUT' })); } });
   Promise.all(ps).then(function() { loadAttendance(date); });
 }
+
+// ── Per-SR Shift Duration Management ──────────────────────────────────────────
+
+function loadSrShiftDurations() {
+  fetch('/api/attendance/sr-shift-durations')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      srShiftDurations = data || {};
+      // Update any visible shift duration inputs
+      document.querySelectorAll('[data-sr-shift]').forEach(function(inp) {
+        var sr = inp.getAttribute('data-sr-shift');
+        inp.value = srShiftDurations[sr] || 600;
+      });
+    })
+    .catch(function(e) { console.warn('Failed to load SR shift durations:', e); });
+}
+
+function saveSrShiftDurations() {
+  var inputs = document.querySelectorAll('[data-sr-shift]');
+  var durations = {};
+  inputs.forEach(function(inp) {
+    var sr = inp.getAttribute('data-sr-shift');
+    var val = parseInt(inp.value, 10);
+    if (!isNaN(val) && val >= 120 && val <= 720) {
+      durations[sr] = val;
+    }
+  });
+  fetch('/api/attendance/sr-shift-durations', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(durations)
+  })
+  .then(function(r) {
+    if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'Save failed'); });
+    return r.json();
+  })
+  .then(function(saved) {
+    srShiftDurations = saved;
+    var btn = document.getElementById('save-shift-durations-btn');
+    if (btn) { btn.textContent = '✅ Saved!'; setTimeout(function() { btn.textContent = '💾 Save Shift Durations'; }, 2000); }
+  })
+  .catch(function(e) { showAllocError('Failed to save shift durations: ' + e.message); });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 
 function addNewSr() {
   var input = document.getElementById('new-sr-input'), name = input.value.trim();
@@ -2761,6 +2815,7 @@ var drawingActive = false;
 var plannedRegionCount = 0;     // how many regions the user wants to draw
 var regionSrCounts = {};        // { "Region 1": 2, "Region 2": 3 } — user-specified SR count per region
 var srZoneMap = {};             // { "SR-001": "Region 1", "SR-002": "Region 2" } — SR → zone assignment
+var srShiftDurations = {};      // { "SR-001": 480, "SR-005": 600 } — per-SR shift duration in minutes
 
 // Distinct colors for numbered regions
 var REGION_COLORS = ['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa',
@@ -3469,6 +3524,7 @@ function applyAllocationModeUI(mode) {
   var timeBtn  = document.getElementById('mode-timebased-btn');
   var capInputs = document.getElementById('capacity-inputs');
   var shiftInd  = document.getElementById('shift-duration-indicator');
+  var shiftSaveBtn = document.getElementById('save-shift-durations-btn');
 
   if (mode === 'time-based') {
     // Active: time-based
@@ -3477,6 +3533,9 @@ function applyAllocationModeUI(mode) {
     // 9.4: hide capacity inputs, show shift duration indicator
     if (capInputs) capInputs.style.display = 'none';
     if (shiftInd)  shiftInd.style.display = 'block';
+    // Show per-SR shift inputs and save button
+    document.querySelectorAll('.sr-shift-input').forEach(function(el) { el.style.display = ''; });
+    if (shiftSaveBtn) shiftSaveBtn.style.display = 'block';
   } else {
     // Active: count-based
     if (countBtn) { countBtn.style.background = '#1976d2'; countBtn.style.color = '#fff'; countBtn.style.border = 'none'; }
@@ -3484,6 +3543,9 @@ function applyAllocationModeUI(mode) {
     // 9.5: show capacity inputs, hide shift duration indicator
     if (capInputs) capInputs.style.display = 'block';
     if (shiftInd)  shiftInd.style.display = 'none';
+    // Hide per-SR shift inputs and save button
+    document.querySelectorAll('.sr-shift-input').forEach(function(el) { el.style.display = 'none'; });
+    if (shiftSaveBtn) shiftSaveBtn.style.display = 'none';
   }
 }
 
@@ -4039,6 +4101,9 @@ window.addEventListener('load', function() {
 
   // 9.2: Restore allocation mode from localStorage on page load
   applyAllocationModeUI(getAllocationMode());
+
+  // Load per-SR shift durations from backend
+  loadSrShiftDurations();
 
   document.getElementById('run-osm-btn').addEventListener('click', function() { runAllocation('osm'); });
   document.getElementById('run-google-btn').addEventListener('click', function() { runAllocation('google'); });

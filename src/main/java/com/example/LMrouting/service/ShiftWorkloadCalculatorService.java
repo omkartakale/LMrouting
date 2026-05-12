@@ -39,7 +39,7 @@ public class ShiftWorkloadCalculatorService {
     private double hubLng;
 
     // Handling times — configurable to match actual delivery time constants.
-    @Value("${allocation.handling.time.cod:6.0}")
+    @Value("${allocation.handling.time.cod:5.0}")
     private double handlingTimeCod;
 
     @Value("${allocation.handling.time.prepaid:5.0}")

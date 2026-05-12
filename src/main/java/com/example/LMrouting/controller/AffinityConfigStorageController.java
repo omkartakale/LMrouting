@@ -21,6 +21,15 @@ public class AffinityConfigStorageController {
     @PostMapping("/save")
     public ResponseEntity<Map<String, Object>> saveConfig(@RequestBody Map<String, Object> config) {
         try {
+            // Merge with existing config to preserve fields not sent by the frontend
+            // (e.g., srShiftDurations saved separately via /api/attendance/sr-shift-durations)
+            Map<String, Object> existing = storageService.loadConfig();
+            if (existing != null && !existing.isEmpty()) {
+                // Preserve srShiftDurations if not included in the incoming save
+                if (!config.containsKey("srShiftDurations") && existing.containsKey("srShiftDurations")) {
+                    config.put("srShiftDurations", existing.get("srShiftDurations"));
+                }
+            }
             storageService.saveConfig(config);
             Map<String, Object> response = new HashMap<>();
             response.put("success", true);

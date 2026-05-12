@@ -47,6 +47,9 @@ public class TravelTimeCacheService {
     @Value("${allocation.shift.avg.speed.kmh:20}")
     private double avgSpeedKmh;
 
+    @Value("${allocation.route.optimizer.road.factor:1.0}")
+    private double roadFactor;
+
     // Cache: key → travel time in minutes
     private final ConcurrentHashMap<String, Double> cache = new ConcurrentHashMap<>();
 
@@ -293,11 +296,13 @@ public class TravelTimeCacheService {
             }
         }
 
-        // Indian road multiplier 1.15: accounts for non-grid urban layouts,
-        // one-way diversions, and typical Indian city road patterns.
+        // Road factor (configurable via allocation.route.optimizer.road.factor, default 1.15):
+        // accounts for non-grid urban layouts, one-way diversions, traffic, and
+        // non-linear routes in typical Indian city road patterns.
         // Combined with 88% target utilisation, this gives a safe buffer
         // that keeps actual routes within 8 hours.
-        double roadFactor = 1.15;
+        // This same value is used by BOTH packing (ShiftWorkloadCalculatorService)
+        // AND SR timeline (SrTimelineService) to ensure ETA consistency.
         return (distKm * roadFactor / speed) * 60.0;
     }
 }

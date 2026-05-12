@@ -1,5 +1,6 @@
 package com.example.LMrouting.dto;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -32,23 +33,67 @@ public record RegionSummaryDto(
         double minUtilisationPct,     // lowest utilisation SR in this region (0 if idle SRs exist)
 
         // ── Health status ─────────────────────────────────────────────────────
-        // "HEALTHY"    — all SRs near-full, no overflow
-        // "OVERFLOW"   — shipments couldn't be allocated (need more SRs)
-        // "UNDERLOADED" — SRs have low utilisation (too many SRs for the load)
-        // "IDLE_SRS"   — some SRs assigned but got 0 shipments
+        // "UNDERLOADED" — avg utilisation < 50%
+        // "HEALTHY"     — avg utilisation 50-90%
+        // "OVERLOADED"  — avg utilisation > 90% OR overflow > 0
         String healthStatus,
 
         // ── Rebalancing suggestions ───────────────────────────────────────────
         // Actionable suggestions for the hub supervisor
-        List<SrRebalanceSuggestion> suggestions
+        List<SrRebalanceSuggestion> suggestions,
+
+        // ── Configuration warnings ────────────────────────────────────────────
+        // Warnings about region configuration issues (e.g., no SRs assigned)
+        List<String> configurationWarnings,
+
+        // ── Small leftover warning ────────────────────────────────────────────
+        // True when overflow < threshold and consolidation failed — shipments
+        // marked unallocated instead of activating a new SR
+        Boolean smallLeftoverWarning
 ) {
     /**
+     * Backward-compatible constructor without configurationWarnings or smallLeftoverWarning.
+     */
+    public RegionSummaryDto(String regionName, int totalShipmentsInRegion, int allocatedShipments,
+                             int overflowShipments, int assignedSrCount, int activeSrCount,
+                             int idleSrCount, List<String> assignedSrNames, List<String> activeSrNames,
+                             List<String> idleSrNames, double avgUtilisationPct, double maxUtilisationPct,
+                             double minUtilisationPct, String healthStatus,
+                             List<SrRebalanceSuggestion> suggestions) {
+        this(regionName, totalShipmentsInRegion, allocatedShipments, overflowShipments,
+             assignedSrCount, activeSrCount, idleSrCount, assignedSrNames, activeSrNames,
+             idleSrNames, avgUtilisationPct, maxUtilisationPct, minUtilisationPct,
+             healthStatus, suggestions, Collections.emptyList(), null);
+    }
+
+    /**
+     * Backward-compatible constructor with configurationWarnings but without smallLeftoverWarning.
+     */
+    public RegionSummaryDto(String regionName, int totalShipmentsInRegion, int allocatedShipments,
+                             int overflowShipments, int assignedSrCount, int activeSrCount,
+                             int idleSrCount, List<String> assignedSrNames, List<String> activeSrNames,
+                             List<String> idleSrNames, double avgUtilisationPct, double maxUtilisationPct,
+                             double minUtilisationPct, String healthStatus,
+                             List<SrRebalanceSuggestion> suggestions,
+                             List<String> configurationWarnings) {
+        this(regionName, totalShipmentsInRegion, allocatedShipments, overflowShipments,
+             assignedSrCount, activeSrCount, idleSrCount, assignedSrNames, activeSrNames,
+             idleSrNames, avgUtilisationPct, maxUtilisationPct, minUtilisationPct,
+             healthStatus, suggestions, configurationWarnings, null);
+    }
+
+    /**
      * Compute health status from the region's metrics.
+     * <p>
+     * Classification thresholds:
+     * - UNDERLOADED: avg utilisation < 50%
+     * - HEALTHY: avg utilisation 50-90%
+     * - OVERLOADED: avg utilisation > 90% OR overflow > 0
      */
     public static String computeHealthStatus(int overflowShipments, int idleSrCount,
                                               double avgUtilisationPct) {
-        if (overflowShipments > 0) return "OVERFLOW";
-        if (idleSrCount > 0) return "IDLE_SRS";
+        if (overflowShipments > 0) return "OVERLOADED";
+        if (avgUtilisationPct > 90.0) return "OVERLOADED";
         if (avgUtilisationPct < 50.0) return "UNDERLOADED";
         return "HEALTHY";
     }
