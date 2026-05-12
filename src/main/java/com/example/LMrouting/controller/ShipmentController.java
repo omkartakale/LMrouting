@@ -23,21 +23,70 @@ public class ShipmentController {
     private final InMemoryStore store;
 
     /**
+     * Get ALL shipments across all dates — for "Plot All Points" visualization.
+     * Returns every uploaded shipment regardless of date or allocation status.
+     * GET /api/shipments/all
+     */
+    @GetMapping("/all")
+    public ResponseEntity<?> getAllShipments() {
+        try {
+            List<String> dates = store.findAllDates();
+            if (dates.isEmpty()) {
+                return ResponseEntity.ok(List.of());
+            }
+            List<Map<String, Object>> shipmentData = new java.util.ArrayList<>();
+            for (String date : dates) {
+                List<?> shipments = store.findShipmentsByDate(date);
+                shipments.stream()
+                        .filter(s -> s instanceof Shipment)
+                        .map(s -> {
+                            Shipment shipment = (Shipment) s;
+                            java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+                            data.put("shipmentId", shipment.getShippingId() != null ? shipment.getShippingId() : "");
+                            data.put("pincode", shipment.getDropPincode() != null ? shipment.getDropPincode() : "UNKNOWN");
+                            data.put("latitude", shipment.getDropLatitude());
+                            data.put("longitude", shipment.getDropLongitude());
+                            data.put("isHeavy", shipment.getIsHeavy());
+                            data.put("weight", shipment.getPhyWeight());
+                            data.put("outOfRange", shipment.isOutOfRange());
+                            data.put("assignedSr", shipment.getAssignedSr() != null ? shipment.getAssignedSr() : "");
+                            data.put("priority", shipment.getPriority() != null ? shipment.getPriority() : "P2");
+                            data.put("date", date);
+                            return data;
+                        })
+                        .forEach(shipmentData::add);
+            }
+            log.info("Returning {} total shipments across {} dates", shipmentData.size(), dates.size());
+            return ResponseEntity.ok(shipmentData);
+        } catch (Exception e) {
+            log.error("Error fetching all shipments", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", "Error fetching shipments: " + e.getMessage()));
+        }
+    }
+
+    /**
      * Get all shipments for a specific date.
      * Used by affinity mode visualization to display shipments on map.
-     * 
      * GET /api/shipments/{date}
-     * 
-     * @param date The allocation date (e.g., "2024-01-15")
-     * @return List of shipments with coordinates and metadata
      */
     @GetMapping("/{date}")
     public ResponseEntity<?> getShipmentsByDate(@PathVariable String date) {
         try {
             log.info("Fetching shipments for date: {}", date);
-            
+
+            // Try the date as-is first, then try format conversions
             List<?> shipments = store.findShipmentsByDate(date);
-            
+
+            // If not found, try converting ISO date to the stored format (dd-MMM-yy)
+            if (shipments.isEmpty()) {
+                String converted = convertDateFormat(date);
+                if (converted != null && !converted.equals(date)) {
+                    log.info("Retrying with converted date: {}", converted);
+                    shipments = store.findShipmentsByDate(converted);
+                }
+            }
+
             if (shipments.isEmpty()) {
                 log.warn("No shipments found for date: {}", date);
                 return ResponseEntity.status(404)
@@ -49,19 +98,19 @@ public class ShipmentController {
                     .filter(s -> s instanceof Shipment)
                     .map(s -> {
                         Shipment shipment = (Shipment) s;
-                        Map<String, Object> data = Map.of(
-                                "shipmentId", shipment.getShippingId() != null ? shipment.getShippingId() : "",
-                                "pincode", shipment.getDropPincode() != null ? shipment.getDropPincode() : "UNKNOWN",
-                                "latitude", shipment.getDropLatitude(),
-                                "longitude", shipment.getDropLongitude(),
-                                "cityName", shipment.getCityName() != null ? shipment.getCityName() : "",
-                                "stateName", shipment.getStateName() != null ? shipment.getStateName() : "",
-                                "isHeavy", shipment.getIsHeavy(),
-                                "weight", shipment.getPhyWeight(),
-                                "outOfRange", shipment.isOutOfRange(),
-                                "assignedSr", shipment.getAssignedSr() != null ? shipment.getAssignedSr() : ""
-                        );
-                        return (Map<String, Object>) (Map<?, ?>) data;
+                        java.util.LinkedHashMap<String, Object> data = new java.util.LinkedHashMap<>();
+                        data.put("shipmentId", shipment.getShippingId() != null ? shipment.getShippingId() : "");
+                        data.put("pincode", shipment.getDropPincode() != null ? shipment.getDropPincode() : "UNKNOWN");
+                        data.put("latitude", shipment.getDropLatitude());
+                        data.put("longitude", shipment.getDropLongitude());
+                        data.put("cityName", shipment.getCityName() != null ? shipment.getCityName() : "");
+                        data.put("stateName", shipment.getStateName() != null ? shipment.getStateName() : "");
+                        data.put("isHeavy", shipment.getIsHeavy());
+                        data.put("weight", shipment.getPhyWeight());
+                        data.put("outOfRange", shipment.isOutOfRange());
+                        data.put("assignedSr", shipment.getAssignedSr() != null ? shipment.getAssignedSr() : "");
+                        data.put("priority", shipment.getPriority() != null ? shipment.getPriority() : "P2");
+                        return (Map<String, Object>) data;
                     })
                     .toList();
             
@@ -117,5 +166,39 @@ public class ShipmentController {
             return ResponseEntity.internalServerError()
                     .body(Map.of("error", "Error fetching stats: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Try to convert a date string from ISO format (yyyy-MM-dd) to the stored
+     * ingestion format (dd-MMM-yy, e.g. "24-Mar-26").
+     * Returns null if conversion fails.
+     */
+    private String convertDateFormat(String dateStr) {
+        if (dateStr == null || dateStr.isBlank()) return null;
+        // First try all stored dates — find one that matches when both are parsed
+        try {
+            java.time.LocalDate target = parseAnyDate(dateStr);
+            if (target != null) {
+                for (String stored : store.findAllDates()) {
+                    java.time.LocalDate storedDate = parseAnyDate(stored);
+                    if (target.equals(storedDate)) return stored;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private java.time.LocalDate parseAnyDate(String s) {
+        if (s == null || s.isBlank()) return null;
+        java.time.format.DateTimeFormatter[] fmts = {
+            java.time.format.DateTimeFormatter.ISO_LOCAL_DATE,
+            java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", java.util.Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("d-MMM-yy", java.util.Locale.ENGLISH),
+            java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy", java.util.Locale.ENGLISH),
+        };
+        for (var fmt : fmts) {
+            try { return java.time.LocalDate.parse(s.trim(), fmt); } catch (Exception ignored) {}
+        }
+        return null;
     }
 }

@@ -219,10 +219,11 @@ public class AllocationEngineService {
             log.warn("Capacity exceeded: {} shipments > {} capacity ({} SRs × {}). {} will be unallocated.",
                     withinBoundary.size(), totalCapacity, presentSrs.size(), srCapacityMax,
                     withinBoundary.size() - totalCapacity);
-            // Sort by expectedPayout descending, then shippingId ascending as a stable tiebreaker
-            // to guarantee deterministic selection when two shipments have equal payout.
+            // Sort by effectivePayout descending (P0 × 1.0 > P1 × 0.75 > P2 × 0.5),
+            // then shippingId ascending as a stable tiebreaker.
+            // This ensures highest-value shipments are always allocated first.
             List<Shipment> sorted = withinBoundary.stream()
-                    .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed()
+                    .sorted(Comparator.comparingDouble(Shipment::effectivePayout).reversed()
                             .thenComparing(Shipment::getShippingId))
                     .collect(Collectors.toList());
             toAllocate  = new ArrayList<>(sorted.subList(0, totalCapacity));
@@ -412,7 +413,8 @@ public class AllocationEngineService {
                         s.getRouteSequence(), s.getShippingId(), s.getDropPincode(),
                         s.getDropLatitude(), s.getDropLongitude(), s.getOrderType(),
                         s.getPhyWeight(), s.getIsHeavy() == 1, s.getShipmentFlow(),
-                        s.isOverride(), s.isOutOfRange()))
+                        s.isOverride(), s.isOutOfRange(),
+                        s.getPriority() != null ? s.getPriority() : "P2"))
                 .collect(Collectors.toList());
 
         return new SrRouteDto(srName, dateStr, shipments.size(), distKm, stops);
@@ -924,9 +926,14 @@ public class AllocationEngineService {
 
             int heavyCount = (int) list.stream().filter(s -> s.getIsHeavy() == 1).count();
             double dist    = distancesBySr.getOrDefault(sr, 0.0);
-            double gross   = CompositeLoadScoreCalculator.grossPayout(list);
+            double gross   = CompositeLoadScoreCalculator.grossPayout(list); // uses effectivePayout
             double fuel    = CompositeLoadScoreCalculator.fuelCost(dist);
             double net     = earningsBySr.getOrDefault(sr, gross - fuel);
+
+            // Priority breakdown
+            int p0 = (int) list.stream().filter(s -> "P0".equalsIgnoreCase(s.getPriority())).count();
+            int p1 = (int) list.stream().filter(s -> "P1".equalsIgnoreCase(s.getPriority())).count();
+            int p2 = (int) list.stream().filter(s -> s.getPriority() == null || "P2".equalsIgnoreCase(s.getPriority())).count();
 
             List<String> pincodes = list.stream()
                     .map(Shipment::getDropPincode)
@@ -944,7 +951,10 @@ public class AllocationEngineService {
                     pincodes,
                     gross,
                     fuel,
-                    net));
+                    net,
+                    p0,
+                    p1,
+                    p2));
         }
 
         IntSummaryStatistics stats = assignment.values().stream()

@@ -104,6 +104,10 @@ public class CsvIngestionService {
         for (String s : new String[]{"srname","sr_id","srid","delivery_user_id","deliveryuserid",
                 "rider","rider_name","rider_id","delivery_boy","delivery_agent"})
             m.put(s, "sr_name");
+        // priority — P0, P1, P2 shipment priority tier
+        for (String s : new String[]{"priority","shipment_priority","delivery_priority",
+                "sla","sla_type","tier","service_level"})
+            m.put(s, "priority");
         COLUMN_ALIASES = Collections.unmodifiableMap(m);
     }
 
@@ -499,6 +503,7 @@ public class CsvIngestionService {
                 .runNumber(parseInt(getOrDefault(cols, colIndex, "run_number", "0"), 0))
                 .rate(parseDouble(getOrDefault(cols, colIndex, "rate", "0"), 0.0))
                 .expectedPayout(parseDouble(getOrDefault(cols, colIndex, "expected_payout", "0"), 0.0))
+                .priority(normalizePriority(getOrDefault(cols, colIndex, "priority", "P2")))
                 .outOfRange(outOfRange)
                 .distanceFromHubKm(distKm)
                 .build();
@@ -616,6 +621,21 @@ public class CsvIngestionService {
         if (s == null || s.isBlank()) return def;
         try { return (int) Double.parseDouble(s.trim()); }
         catch (NumberFormatException e) { return def; }
+    }
+
+    /**
+     * Normalise priority value from CSV to canonical P0/P1/P2.
+     * Accepts: "P0","p0","0","HIGH" → "P0"; "P1","p1","1","MEDIUM" → "P1"; "P2","p2","2","LOW" → "P2"
+     */
+    private static String normalizePriority(String raw) {
+        if (raw == null || raw.isBlank()) return "P2";
+        String v = raw.trim().toUpperCase();
+        return switch (v) {
+            case "P0", "0", "HIGH", "URGENT", "CRITICAL" -> "P0";
+            case "P1", "1", "MEDIUM", "NORMAL"           -> "P1";
+            case "P2", "2", "LOW", "STANDARD"            -> "P2";
+            default -> v.startsWith("P") ? v : "P2"; // keep P3+ as-is, unknown → P2
+        };
     }
 
     private record ParseResult(Shipment shipment, String warning, String error) {

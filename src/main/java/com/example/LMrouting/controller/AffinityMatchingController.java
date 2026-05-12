@@ -387,25 +387,42 @@ public class AffinityMatchingController {
 
         LocalDate date = AllocationController.parseDate(dateStr);
 
-        // Step 1: Run standard allocation to get filtered shipments + present SRs
-        AllocationSummary summary = allocationEngineService.allocate(date);
-        String storeDateStr = summary.date();
+        // Step 1: Get all uploaded shipments for this date (don't run standard allocation)
+        // We use the raw uploaded shipments, not the standard allocation output.
+        // This ensures region-based allocation is independent of K-Means.
+        String storeDateStr = date.format(java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yy", java.util.Locale.ENGLISH));
+        // Try to find the actual stored date key
+        for (String d : store.findAllDates()) {
+            try {
+                java.time.LocalDate parsed = AllocationController.parseDate(d);
+                if (parsed.equals(date)) { storeDateStr = d; break; }
+            } catch (Exception ignored) {}
+        }
 
         List<Shipment> allShipments = store.findShipmentsByDate(storeDateStr);
-        List<Shipment> allocated = allShipments.stream()
-                .filter(s -> s.getAssignedSr() != null)
-                .collect(Collectors.toList());
+        if (allShipments.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No shipment data found for " + dateStr + ". Please upload a CSV file first."));
+        }
+
         List<String> presentSRs = store.getPresentSrNames(date);
+        if (presentSRs.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "At least one SR must be marked present before running allocation."));
+        }
         int numSRs = presentSRs.size();
 
-        // Step 2: Count shipments per region
+        // Filter: only shipments with valid coordinates
+        List<Shipment> validShipments = allShipments.stream()
+                .filter(s -> s.getDropLatitude() != 0 && s.getDropLongitude() != 0)
+                .collect(Collectors.toList());
+
+        // Step 2: Assign shipments to regions using point-in-polygon
         List<String> regionNames = new ArrayList<>(customRegions.keySet());
         Map<String, List<Shipment>> shipmentsByRegion = new LinkedHashMap<>();
         Set<String> assignedIds = new HashSet<>();
 
         for (String regionName : regionNames) {
             double[][] polygon = customRegions.get(regionName);
-            List<Shipment> inRegion = allocated.stream()
+            List<Shipment> inRegion = validShipments.stream()
                     .filter(s -> !assignedIds.contains(s.getShippingId()))
                     .filter(s -> pointInPolygon(s.getDropLatitude(), s.getDropLongitude(), polygon))
                     .collect(Collectors.toList());
@@ -543,8 +560,10 @@ public class AffinityMatchingController {
         }
 
         // Unassigned shipments stay unallocated
-        long unassigned = allocated.stream()
-                .filter(s -> matched.values().stream().noneMatch(list -> list.stream().anyMatch(sh -> sh.getShippingId().equals(s.getShippingId()))))
+        Set<String> allocatedIds = matched.values().stream()
+                .flatMap(List::stream).map(Shipment::getShippingId).collect(java.util.stream.Collectors.toSet());
+        long unassigned = validShipments.stream()
+                .filter(s -> !allocatedIds.contains(s.getShippingId()))
                 .count();
         if (unassigned > 0) {
             log.info("AffinityMatch custom: {} shipments outside all custom regions → unallocated", unassigned);
@@ -563,9 +582,18 @@ public class AffinityMatchingController {
             entry.setValue(ordered);
         }
 
-        // Save
-        List<Shipment> toSave = matched.values().stream()
-                .flatMap(List::stream).collect(Collectors.toList());
+        // Save: rebuild full shipment list — allocated get SR assigned, unallocated get SR cleared
+        Map<String, Shipment> allocatedById = new LinkedHashMap<>();
+        for (List<Shipment> list : matched.values()) {
+            for (Shipment s : list) allocatedById.put(s.getShippingId(), s);
+        }
+        List<Shipment> toSave = allShipments.stream().map(s -> {
+            Shipment updated = allocatedById.get(s.getShippingId());
+            if (updated != null) return updated;
+            s.setAssignedSr(null);
+            s.setRouteSequence(0);
+            return s;
+        }).collect(Collectors.toList());
         store.saveShipments(storeDateStr, toSave);
 
         // Compute scores
@@ -580,6 +608,18 @@ public class AffinityMatchingController {
             sc.put("affinityPct", 100.0);
             scores.put(sr, sc);
         }
+
+        // Save AllocationRun so getSummary works
+        com.example.LMrouting.model.AllocationRun run = com.example.LMrouting.model.AllocationRun.builder()
+                .allocationDate(date)
+                .status(com.example.LMrouting.model.AllocationStatus.COMPLETED)
+                .totalShipments(allShipments.size())
+                .totalSrs(numSRs)
+                .fairnessVariance(0.0)
+                .earningsRange(0.0)
+                .createdAt(java.time.LocalDateTime.now())
+                .build();
+        store.saveAllocationRun(run);
 
         AllocationSummary newSummary = allocationEngineService.getSummary(date);
 

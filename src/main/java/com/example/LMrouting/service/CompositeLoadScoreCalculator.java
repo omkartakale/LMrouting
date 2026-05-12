@@ -42,14 +42,16 @@ public class CompositeLoadScoreCalculator {
     // =========================================================================
 
     /**
-     * Compute the gross payout for a list of shipments (sum of expectedPayout).
+     * Compute the gross payout for a list of shipments.
+     * Uses <strong>effective payout</strong> = expectedPayout × priorityFactor:
+     *   P0 → ×1.00, P1 → ×0.75, P2 → ×0.50
      *
      * @param shipments shipments assigned to one SR
-     * @return total expected payout in ₹
+     * @return total effective payout in ₹
      */
     public static double grossPayout(List<Shipment> shipments) {
         if (shipments == null || shipments.isEmpty()) return 0.0;
-        return shipments.stream().mapToDouble(Shipment::getExpectedPayout).sum();
+        return shipments.stream().mapToDouble(Shipment::effectivePayout).sum();
     }
 
     /**

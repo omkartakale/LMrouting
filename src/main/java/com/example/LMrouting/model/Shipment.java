@@ -33,6 +33,12 @@ public class Shipment {
     private double rate;
     private double expectedPayout;
 
+    // Shipment priority: P0 (factor 1.0), P1 (factor 0.75), P2 (factor 0.5)
+    // Populated from the "Priority" column in the uploaded CSV.
+    // Defaults to "P2" (lowest priority) if not present in the CSV.
+    @Builder.Default
+    private String priority = "P2";
+
     // Allocation output fields
     private String assignedSr;
     private int routeSequence;
@@ -49,4 +55,28 @@ public class Shipment {
 
     // Actual Haversine distance from hub (computed during ingestion)
     private double distanceFromHubKm;
+
+    /**
+     * Priority weight factor:
+     *   P0 → 1.00 (full value)
+     *   P1 → 0.75
+     *   P2 → 0.50
+     *   unknown → 1.00 (treat as P0)
+     */
+    public double priorityFactor() {
+        if (priority == null) return 1.0;
+        return switch (priority.trim().toUpperCase()) {
+            case "P1" -> 0.75;
+            case "P2" -> 0.50;
+            default   -> 1.00; // P0 or unknown
+        };
+    }
+
+    /**
+     * Effective payout = expectedPayout × priorityFactor.
+     * This is the value used by the allocation algorithm for fairness scoring.
+     */
+    public double effectivePayout() {
+        return expectedPayout * priorityFactor();
+    }
 }

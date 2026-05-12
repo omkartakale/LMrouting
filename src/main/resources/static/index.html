@@ -433,6 +433,12 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div id="legend-items"></div>
     </div>
 
+    <!-- Full-screen map loading overlay -->
+    <div id="map-loading-overlay" style="display:none;position:absolute;inset:0;z-index:20000;background:rgba(255,255,255,.75);backdrop-filter:blur(2px);flex-direction:column;align-items:center;justify-content:center;gap:14px">
+      <div style="width:48px;height:48px;border:5px solid rgba(25,118,210,.2);border-top-color:#1976d2;border-radius:50%;animation:spin .8s linear infinite"></div>
+      <div id="map-loading-text" style="font-size:.9rem;font-weight:600;color:#1565c0">Processing...</div>
+    </div>
+
     <!-- Shipment display toggle — bottom-right -->
     <div id="shipment-toggle-btn"
          onclick="toggleShipmentDisplay()"
@@ -543,6 +549,18 @@ function showAllocInfo(msg) {
 
 function hideAllocError() {
   document.getElementById('alloc-error').style.display = 'none';
+}
+
+function showMapLoading(text) {
+  var overlay = document.getElementById('map-loading-overlay');
+  var textEl  = document.getElementById('map-loading-text');
+  if (overlay) { overlay.style.display = 'flex'; }
+  if (textEl)  { textEl.textContent = text || 'Processing...'; }
+}
+
+function hideMapLoading() {
+  var overlay = document.getElementById('map-loading-overlay');
+  if (overlay) { overlay.style.display = 'none'; }
 }
 
 // ── MAP ──────────────────────────────────────────────────────────────────────
@@ -1017,12 +1035,46 @@ function togglePincodeBoundaries() {
 }
 
 // ── HUB BOUNDARY ──────────────────────────────────────────────────────────────
-/**
- * Fire-and-forget: fetch hub boundary from backend proxy and draw on map.
- * Silently does nothing if the fetch fails or returns no data.
- */
 // Cached boundary data — stored after first successful fetch so re-uploads don't need a new API call
 var cachedBoundaryData = null;
+
+/**
+ * Generate a circle polygon around a lat/lng centre (N-sided approximation).
+ * Returns [[lat,lng],...] suitable for drawHubBoundary.
+ */
+function makeCirclePolygon(lat, lng, radiusKm, points) {
+  points = points || 64;
+  var coords = [];
+  var R = 6371;
+  var latR = lat * Math.PI / 180;
+  var lngR = lng * Math.PI / 180;
+  var d = radiusKm / R;
+  for (var i = 0; i <= points; i++) {
+    var bearing = (2 * Math.PI * i) / points;
+    var pLat = Math.asin(Math.sin(latR) * Math.cos(d) + Math.cos(latR) * Math.sin(d) * Math.cos(bearing));
+    var pLng = lngR + Math.atan2(Math.sin(bearing) * Math.sin(d) * Math.cos(latR), Math.cos(d) - Math.sin(latR) * Math.sin(pLat));
+    coords.push([pLat * 180 / Math.PI, pLng * 180 / Math.PI]);
+  }
+  return coords;
+}
+
+/**
+ * Draw a circle fallback boundary using the configured radius from /api/hub/boundary-radius.
+ * Called when the real API boundary is unavailable.
+ */
+function drawHubBoundaryFallback(hubName) {
+  fetch('/api/hub/boundary-radius')
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      var radiusKm = (cfg && cfg.boundaryKm) ? cfg.boundaryKm : 15;
+      var coords = makeCirclePolygon(HUB_LAT, HUB_LNG, radiusKm);
+      drawHubBoundary(coords, null, hubName, hubName + ' (±' + radiusKm + ' km)');
+    })
+    .catch(function() {
+      var coords = makeCirclePolygon(HUB_LAT, HUB_LNG, 15);
+      drawHubBoundary(coords, null, hubName, hubName + ' (±15 km)');
+    });
+}
 
 function fetchHubBoundary(hubName) {
   if (!hubName) return;
@@ -1030,7 +1082,6 @@ function fetchHubBoundary(hubName) {
 
   // If we already have cached boundary data for this hub, redraw immediately
   if (cachedBoundaryData && cachedBoundaryData.hubName === hubName) {
-    console.log('Hub boundary: redrawing from cache for', hubName);
     drawHubBoundary(
       cachedBoundaryData.coordinates,
       cachedBoundaryData.originalBoundary || null,
@@ -1040,26 +1091,18 @@ function fetchHubBoundary(hubName) {
     return;
   }
 
-  console.log('Hub boundary: fetching from API for', hubName);
+  // Draw circle fallback immediately — don't wait for slow external API
+  drawHubBoundaryFallback(hubName);
 
+  // Try real API in background — replace circle if real polygon available
   fetch('/api/hub/boundary?hubName=' + encodeURIComponent(hubName))
     .then(function(r) {
-      if (r.status === 204 || !r.ok) {
-        console.warn('Hub boundary: API returned', r.status, 'for hub', hubName);
-        showBoundaryWarning(hubName);
-        return null;
-      }
+      if (r.status === 204 || !r.ok) return null;
       return r.json();
     })
     .then(function(data) {
-      if (!data) return;
-      if (!data.coordinates || !data.coordinates.length) {
-        console.warn('Hub boundary: empty coordinates for hub', hubName);
-        showBoundaryWarning(hubName);
-        return;
-      }
-      console.log('Hub boundary: drawing', data.coordinates.length, 'points for', hubName);
-      // Cache for subsequent re-uploads
+      if (!data || !data.coordinates || !data.coordinates.length) return;
+      // Real boundary available — replace the circle
       cachedBoundaryData = data;
       drawHubBoundary(
         data.coordinates,
@@ -1068,36 +1111,7 @@ function fetchHubBoundary(hubName) {
         data.facilityName || hubName
       );
     })
-    .catch(function(err) {
-      console.warn('Hub boundary fetch failed:', err);
-      showBoundaryWarning(hubName);
-    });
-}
-
-function showBoundaryWarning(hubName) {
-  // Show a non-blocking info message with a retry button
-  var existing = document.getElementById('boundary-warn');
-  if (existing) return; // already showing
-  var el = document.createElement('div');
-  el.id = 'boundary-warn';
-  el.style.cssText = 'position:absolute;bottom:50px;left:50%;transform:translateX(-50%);z-index:10002;' +
-    'background:rgba(255,248,225,.97);border:1px solid #ffe082;border-radius:6px;padding:7px 12px;' +
-    'font-size:.75rem;color:#e65100;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15);' +
-    'display:flex;align-items:center;gap:8px;white-space:nowrap';
-  el.innerHTML = '⚠️ Hub boundary unavailable for <em>' + esc(hubName) + '</em>' +
-    ' &nbsp;<button onclick="retryBoundary()" style="padding:2px 8px;font-size:.72rem;border:1px solid #e65100;' +
-    'border-radius:4px;background:#fff;color:#e65100;cursor:pointer;font-weight:600">Retry</button>' +
-    ' <button onclick="document.getElementById(\'boundary-warn\').remove()" ' +
-    'style="padding:2px 6px;font-size:.72rem;border:none;background:none;color:#999;cursor:pointer">✕</button>';
-  document.getElementById('map-container').appendChild(el);
-  // Auto-dismiss after 10 seconds
-  setTimeout(function() { if (el.parentNode) el.remove(); }, 10000);
-}
-
-function retryBoundary() {
-  var el = document.getElementById('boundary-warn');
-  if (el) el.remove();
-  if (lastHubName) fetchHubBoundary(lastHubName);
+    .catch(function() { /* circle fallback already drawn */ });
 }
 
 /**
@@ -1131,42 +1145,40 @@ function drawHubBoundary(coords, originalCoords, hubName, facilityName) {
   if (hubBoundaryLayer)         { map.removeLayer(hubBoundaryLayer);         hubBoundaryLayer = null; }
   if (hubOriginalBoundaryLayer) { map.removeLayer(hubOriginalBoundaryLayer); hubOriginalBoundaryLayer = null; }
 
-  // ── Primary boundary (facility.boundary) ───────────────────────────────
+  // ── Primary boundary ───────────────────────────────────────────────────
   if (coords && coords.length) {
     var latLngs = coords.map(function(p) { return [p[0], p[1]]; });
     hubBoundaryLayer = L.polygon(latLngs, {
-      pane:        'hubBoundaryPane',
-      color:       '#b71c1c',   // dark red — highly visible, clearly marks the service boundary
-      weight:      4,
+      color:       '#e65100',   // deep orange — visible above tiles (uses default overlayPane z-index 400)
+      weight:      3,
       opacity:     1.0,
-      dashArray:   null,        // solid line — no dash
+      dashArray:   '10, 6',
       lineCap:     'round',
       lineJoin:    'round',
-      fillColor:   '#e53935',
-      fillOpacity: 0.04,        // very light fill — just a hint
+      fillColor:   '#ff6d00',
+      fillOpacity: 0.06,
       interactive: false
     }).addTo(map);
 
     hubBoundaryLayer.bindTooltip(
-      '<span style="font-size:.75rem;font-weight:600;color:#b71c1c">' +
+      '<span style="font-size:.75rem;font-weight:600;color:#e65100">' +
       '&#x1F4CD; ' + esc(facilityName) + ' — Service Area</span>',
       { sticky: false, direction: 'top', opacity: 0.95 }
     );
   }
 
-  // ── Original / admin boundary (facility.originalBoundary) ──────────────
+  // ── Original / admin boundary ──────────────────────────────────────────
   if (originalCoords && originalCoords.length) {
     var origLatLngs = originalCoords.map(function(p) { return [p[0], p[1]]; });
     hubOriginalBoundaryLayer = L.polygon(origLatLngs, {
-      pane:        'hubBoundaryPane',
-      color:       '#00838f',   // teal — clearly visible, clearly secondary to amber primary
+      color:       '#00838f',
       weight:      2,
       opacity:     0.75,
       dashArray:   '6, 8',
       lineCap:     'round',
       lineJoin:    'round',
       fillColor:   '#00bcd4',
-      fillOpacity: 0.04,        // 4% — just a hint of teal tint
+      fillOpacity: 0.04,
       interactive: false
     }).addTo(map);
 
@@ -1521,6 +1533,8 @@ function runAllocation(mode) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Running (' + label + ')...';
   hideAllocError();
+  showMapLoading('Running allocation (' + label + ')...');
+  showMapLoading('Running allocation (' + label + ')...');
 
   // Clear only the polylines for this mode, keep markers
   clearPolylinesByMode(mode);
@@ -1530,10 +1544,17 @@ function runAllocation(mode) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date: date })
   })
-  .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+  .then(function(r) {
+    var ct = r.headers.get('content-type') || '';
+    if (ct.indexOf('application/json') === -1) {
+      return r.text().then(function(t) { return { ok: false, status: r.status, data: { message: 'HTTP ' + r.status + (t ? ': ' + t.substring(0, 120) : '') } }; });
+    }
+    return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; });
+  })
   .then(function(res) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
+    hideMapLoading();
     if (!res.ok) {
       showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
       return;
@@ -1558,6 +1579,7 @@ function runAllocation(mode) {
   .catch(function(e) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
+    hideMapLoading();
     showAllocError('Network error: ' + e.message);
   });
 }
@@ -1652,10 +1674,19 @@ function renderSrList(srSummaries) {
     legendItems.innerHTML += '<div class="legend-item"><div class="legend-dot" style="background:' + color + '"></div>' + esc(sr.srName) + ' (' + sr.shipmentCount + ')</div>';
     var dist = sr.estimatedDistanceKm ? sr.estimatedDistanceKm.toFixed(1) + ' km' : '';
 
-    // Earnings sub-line
+    // Earnings sub-line with effective payout note
     var earningsSub = '';
     if (sr.netEarnings !== undefined && sr.netEarnings !== 0) {
       earningsSub = ' &nbsp;|&nbsp; Net: <strong style="color:#1b5e20">&#x20B9;' + sr.netEarnings.toFixed(2) + '</strong>';
+    }
+
+    // Priority breakdown badges
+    var priorityBadges = '';
+    if (sr.p0Count !== undefined || sr.p1Count !== undefined || sr.p2Count !== undefined) {
+      var p0 = sr.p0Count || 0, p1 = sr.p1Count || 0, p2 = sr.p2Count || 0;
+      if (p0 > 0) priorityBadges += '<span style="background:#e65100;color:#fff;border-radius:3px;padding:0 4px;font-size:.62rem;font-weight:700;margin-right:2px">P0:' + p0 + '</span>';
+      if (p1 > 0) priorityBadges += '<span style="background:#f57c00;color:#fff;border-radius:3px;padding:0 4px;font-size:.62rem;font-weight:700;margin-right:2px">P1:' + p1 + '</span>';
+      if (p2 > 0) priorityBadges += '<span style="background:#ffa726;color:#fff;border-radius:3px;padding:0 4px;font-size:.62rem;font-weight:700;margin-right:2px">P2:' + p2 + '</span>';
     }
 
     var srId = 'sr-item-' + i;
@@ -1666,7 +1697,9 @@ function renderSrList(srSummaries) {
     h += '<div class="sr-item" data-sr="' + esc(sr.srName) + '" data-idx="' + i + '" style="border-radius:7px 7px 0 0;margin-bottom:0" onclick="selectSr(\'' + esc(sr.srName) + '\',' + i + ')">';
     h += '<div class="sr-dot" style="background:' + color + '"></div>';
     h += '<div class="sr-item-info"><div class="sr-item-name">' + esc(sr.srName) + (srAffinityMap[sr.srName] && srAffinityMap[sr.srName].length ? ' <span style="font-size:.65rem;color:#8e24aa;font-weight:400">(' + srAffinityMap[sr.srName].join(',') + ')</span>' : '') + '</div>';
-    h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub + '</div></div>';
+    h += '<div class="sr-item-sub">' + (dist ? dist : '') + earningsSub;
+    if (priorityBadges) h += ' &nbsp;' + priorityBadges;
+    h += '</div></div>';
     h += '<div class="sr-item-badge">' + sr.shipmentCount + '</div>';
     h += '<button class="tl-expand-btn" id="tl-btn-' + i + '" onclick="event.stopPropagation();toggleTimeline(\'' + esc(sr.srName) + '\',' + i + ')" title="View delivery timeline">⏱ Timeline</button>';
     h += '</div>';
@@ -1810,7 +1843,10 @@ function addPolylineForSr(srName, polyCoords, color, mode) {
 function buildPopup(srName, stop, color, date) {
   var oor = stop.outOfRange ? '<div class="popup-oor">Out-of-range</div>' : '';
   var reassign = !allocationFinalized ? '<button class="popup-reassign" onclick="openReassignModal(\'' + esc(stop.shippingId) + '\',\'' + esc(srName) + '\')">Reassign</button>' : '';
-  return '<div><div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + '</div>' + oor +
+  // Priority badge
+  var priorityColor = stop.priority === 'P1' ? '#f57c00' : stop.priority === 'P2' ? '#ffa726' : '#e65100';
+  var priorityBadge = stop.priority ? '<span style="background:' + priorityColor + ';color:#fff;border-radius:3px;padding:0 5px;font-size:.68rem;font-weight:700;margin-left:4px">' + esc(stop.priority) + '</span>' : '';
+  return '<div><div class="popup-title" style="color:' + color + '">' + esc(srName) + ' - Stop #' + stop.sequence + priorityBadge + '</div>' + oor +
     '<div class="popup-row"><span class="popup-label">ID</span><span class="popup-val">' + esc(stop.shippingId) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Pincode</span><span class="popup-val">' + esc(stop.dropPincode) + '</span></div>' +
     '<div class="popup-row"><span class="popup-label">Lat,Lng</span><span class="popup-val">' + (stop.latitude||0).toFixed(5) + ',' + (stop.longitude||0).toFixed(5) + '</span></div>' +
@@ -2056,8 +2092,6 @@ function renderRouteDetails(route, color) {
   // Find earnings for this SR from the last summary
   var earningsHtml = '';
   if (currentSrName) {
-    var srSummaries = document.querySelectorAll('.sr-item');
-    // Try to get earnings from the last rendered summary data stored in srLayers
     var layer = srLayers[currentSrName];
     if (layer && layer.srData) {
       var d = layer.srData;
@@ -2065,7 +2099,7 @@ function renderRouteDetails(route, color) {
         earningsHtml =
           '<div class="stat-box" style="background:#e8f5e9;border-color:#a5d6a7">' +
             '<div class="val" style="color:#1b5e20;font-size:.95rem">&#x20B9;' + d.grossPayout.toFixed(2) + '</div>' +
-            '<div class="lbl">Gross Payout</div>' +
+            '<div class="lbl">Eff. Payout</div>' +
           '</div>' +
           '<div class="stat-box" style="background:#ffebee;border-color:#ef9a9a">' +
             '<div class="val" style="color:#b71c1c;font-size:.95rem">&#x20B9;' + d.fuelCost.toFixed(2) + '</div>' +
@@ -2075,6 +2109,19 @@ function renderRouteDetails(route, color) {
             '<div class="val" style="color:#0d47a1;font-size:.95rem">&#x20B9;' + d.netEarnings.toFixed(2) + '</div>' +
             '<div class="lbl">Net Earnings</div>' +
           '</div>';
+        // Priority breakdown
+        if (d.p0Count !== undefined || d.p1Count !== undefined || d.p2Count !== undefined) {
+          var p0 = d.p0Count || 0, p1 = d.p1Count || 0, p2 = d.p2Count || 0;
+          earningsHtml +=
+            '<div class="stat-box" style="grid-column:1/-1;background:#fff3e0;border-color:#ffcc80">' +
+              '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">' +
+                (p0 > 0 ? '<span style="background:#e65100;color:#fff;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700">P0: ' + p0 + ' ×1.0</span>' : '') +
+                (p1 > 0 ? '<span style="background:#f57c00;color:#fff;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700">P1: ' + p1 + ' ×0.75</span>' : '') +
+                (p2 > 0 ? '<span style="background:#ffa726;color:#fff;border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:700">P2: ' + p2 + ' ×0.50</span>' : '') +
+              '</div>' +
+              '<div class="lbl" style="margin-top:3px">Priority Breakdown</div>' +
+            '</div>';
+        }
       }
     }
   }
@@ -2094,6 +2141,13 @@ function renderRouteDetails(route, color) {
     if (stop.isHeavy) tags += '<span class="stop-tag heavy">Heavy</span>';
     tags += '<span class="stop-tag">' + esc(stop.shipmentFlow) + '</span>';
     tags += '<span class="stop-tag">' + stop.phyWeight + 'kg</span>';
+    // Priority tag
+    if (stop.priority && stop.priority !== 'P0') {
+      var pColor = stop.priority === 'P1' ? '#f57c00' : '#ffa726';
+      tags += '<span class="stop-tag" style="background:' + pColor + ';color:#fff;border:none">' + esc(stop.priority) + '</span>';
+    } else if (stop.priority === 'P0') {
+      tags += '<span class="stop-tag" style="background:#e65100;color:#fff;border:none">P0</span>';
+    }
     h += '<div class="stop-item" onclick="map.setView([' + stop.latitude + ',' + stop.longitude + '],17)">';
     h += '<div class="stop-seq" style="background:' + color + '">' + stop.sequence + '</div>';
     h += '<div class="stop-info"><div class="stop-pincode">' + esc(stop.dropPincode) + '</div>';
@@ -3067,6 +3121,11 @@ function runAffinityAllocation() {
     }
   }
 
+  // Show loading
+  var affinityBtn = document.querySelector('[onclick="runAffinityAllocation()"]');
+  if (affinityBtn) { affinityBtn.disabled = true; affinityBtn.innerHTML = '<span class="spinner"></span> Running Affinity...'; }
+  showMapLoading('Running affinity allocation...');
+
   fetch('/api/affinity-match/set-custom-regions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3119,6 +3178,9 @@ function _handleAffinityResult(data, date) {
 
   var modeInfo = data.mode === 'affinity-custom' ? 'Custom region allocation' : 'Affinity allocation';
   showAllocInfo(modeInfo + ' complete: ' + (data.affinitySRs || data.customRegionSRs || 0) + ' SRs assigned');
+  hideMapLoading();
+  var affinityBtn2 = document.querySelector('[onclick="runAffinityAllocation()"]');
+  if (affinityBtn2) { affinityBtn2.disabled = false; affinityBtn2.innerHTML = '🎯 Run with Affinity'; }
 }
 
 // Show affinity panel when attendance loads

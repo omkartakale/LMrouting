@@ -14,5 +14,6 @@ public record ShipmentStopDto(
         boolean isHeavy,
         String shipmentFlow,
         boolean isOverride,
-        boolean outOfRange
+        boolean outOfRange,
+        String priority
 ) {}

@@ -184,7 +184,8 @@ public class PreviousAllocationController {
                         s.getRouteSequence(), s.getShippingId(), s.getDropPincode(),
                         s.getDropLatitude(), s.getDropLongitude(),
                         s.getOrderType(), s.getPhyWeight(), s.getIsHeavy() == 1,
-                        s.getShipmentFlow(), false, s.isOutOfRange()))
+                        s.getShipmentFlow(), false, s.isOutOfRange(),
+                        s.getPriority() != null ? s.getPriority() : "P2"))
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(new SrRouteDto(srName, dateStr, srShipments.size(), distKm, stops));
