@@ -164,8 +164,14 @@ public class EarningsBalancingService {
 
     /**
      * Find the best boundary shipment to transfer from richSr to poorSr.
-     * "Boundary" = shipments in richSr geographically closest to poorSr's centroid.
-     * Only transfers that keep the receiving SR within shift duration are considered.
+     *
+     * <p>"Boundary" = shipments in richSr whose distance to poorSr's centroid is
+     * less than the median distance of all shipments in richSr to poorSr's centroid.
+     * This ensures only geographically border shipments are considered for transfer,
+     * preserving territory compactness.
+     *
+     * <p>Additionally, rejects transfers that would increase the source SR's route
+     * distance by more than 10%.
      */
     private Shipment findBestTransfer(String richSr, String poorSr,
                                       Map<String, List<Shipment>> assignments,
@@ -178,13 +184,24 @@ public class EarningsBalancingService {
         List<Shipment> poorShipments = assignments.get(poorSr);
         double[] poorCentroid = computeCentroid(poorShipments);
 
-        // Sort by distance to poorSr centroid — boundary candidates first
+        // Compute distances from all rich shipments to poor centroid
+        List<Double> allDistances = richShipments.stream()
+                .map(s -> haversine(s.getDropLatitude(), s.getDropLongitude(),
+                        poorCentroid[0], poorCentroid[1]))
+                .collect(Collectors.toList());
+        double medianDistance = computeMedian(allDistances);
+
+        // Only consider boundary candidates: distance to poor centroid < median distance
         List<Shipment> candidates = richShipments.stream()
+                .filter(s -> haversine(s.getDropLatitude(), s.getDropLongitude(),
+                        poorCentroid[0], poorCentroid[1]) <= medianDistance)
                 .sorted(Comparator.comparingDouble((Shipment s) ->
                         haversine(s.getDropLatitude(), s.getDropLongitude(),
                                 poorCentroid[0], poorCentroid[1])))
                 .limit(BOUNDARY_CANDIDATE_LIMIT)
                 .collect(Collectors.toList());
+
+        if (candidates.isEmpty()) return null;
 
         double currentMedian = computeMedian(earnings.values());
         double bestImprovement = 0.0;
@@ -193,6 +210,9 @@ public class EarningsBalancingService {
         // Determine the effective shift duration for the receiving (poor) SR
         int poorSrShiftDuration = srShiftDurations != null && srShiftDurations.containsKey(poorSr)
                 ? srShiftDurations.get(poorSr) : globalShiftDuration;
+
+        // Compute current route distance for the source SR (for 10% guard)
+        double currentRichDistance = routeOptimizerService.estimateDistanceKm(richShipments);
 
         for (Shipment candidate : candidates) {
             // Simulate transfer: check workload constraint on receiving SR
@@ -208,6 +228,14 @@ public class EarningsBalancingService {
             // Simulate earnings after transfer
             List<Shipment> newRich = new ArrayList<>(richShipments);
             newRich.remove(candidate);
+
+            // Reject if removing this shipment increases source SR route distance by > 10%
+            if (currentRichDistance > 0 && newRich.size() > 1) {
+                double newRichDistance = routeOptimizerService.estimateDistanceKm(newRich);
+                if (newRichDistance > currentRichDistance * 1.10) {
+                    continue; // would degrade source SR's route compactness
+                }
+            }
 
             double newRichEarnings = computeSrEarnings(newRich);
             double newPoorEarnings = computeSrEarnings(newPoor);

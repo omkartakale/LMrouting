@@ -1911,6 +1911,25 @@ function renderAllSrsOnMap(srSummaries, date, mode) {
   // Clear markers only on first allocation; on second just add polylines
   if (!hasOsmAllocation || !hasGoogleAllocation) clearMarkers();
 
+  // Draw territory boundary polygons (behind routes) for time-based mode
+  srSummaries.forEach(function(sr, idx) {
+    if (sr.territoryBoundary && sr.territoryBoundary.length >= 3) {
+      var color = SR_COLORS[idx % SR_COLORS.length];
+      var latlngs = sr.territoryBoundary.map(function(p) { return [p[0], p[1]]; });
+      var polygon = L.polygon(latlngs, {
+        color: color, weight: 1, opacity: 0.5,
+        fillColor: color, fillOpacity: 0.08,
+        interactive: false
+      }).addTo(map);
+      if (!srLayers[sr.srName]) {
+        srLayers[sr.srName] = { markers: [], osmPolyline: null, googlePolyline: null, territoryPolygon: polygon, color: color, index: idx, srData: sr };
+      } else {
+        if (srLayers[sr.srName].territoryPolygon) map.removeLayer(srLayers[sr.srName].territoryPolygon);
+        srLayers[sr.srName].territoryPolygon = polygon;
+      }
+    }
+  });
+
   var i = 0;
   function next() {
     if (i >= srSummaries.length) {
@@ -2416,6 +2435,7 @@ function clearMarkers() {
     if (layer.markers) layer.markers.forEach(function(m) { map.removeLayer(m); });
     if (layer.osmPolyline) map.removeLayer(layer.osmPolyline);
     if (layer.googlePolyline) map.removeLayer(layer.googlePolyline);
+    if (layer.territoryPolygon) map.removeLayer(layer.territoryPolygon);
   });
   srLayers = {};
 }

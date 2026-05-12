@@ -86,7 +86,8 @@ class RegionLoadClassificationTest {
                 pincodeBoundaryService,
                 cfro,
                 new LegacyRouteOptimizer(travelTimeCache),
-                new EarningsBalancingService(workloadCalculator, routeOptimizerService)
+                new EarningsBalancingService(workloadCalculator, routeOptimizerService),
+                new TerritoryPartitionService(workloadCalculator)
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);

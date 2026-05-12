@@ -497,7 +497,8 @@ class PerSrShiftPreservationPropertyTest {
                 pincodeBoundaryService,
                 cfro,
                 new LegacyRouteOptimizer(cache),
-                earningsBalancingService
+                earningsBalancingService,
+                new TerritoryPartitionService(workloadCalculator)
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);

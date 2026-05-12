@@ -533,7 +533,8 @@ class TimeBasedAllocationBugConditionTest {
                 null, // PincodeBoundaryService
                 cfro,
                 new LegacyRouteOptimizer(cache),
-                new EarningsBalancingService(workloadCalc, null)
+                new EarningsBalancingService(workloadCalc, null),
+                new TerritoryPartitionService(workloadCalc)
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);

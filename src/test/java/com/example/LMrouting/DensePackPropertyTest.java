@@ -65,7 +65,8 @@ class DensePackPropertyTest {
                 pincodeBoundaryService,
                 cfro,
                 new LegacyRouteOptimizer(cache),
-                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class))
+                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class)),
+                new TerritoryPartitionService(workloadCalculator)
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);

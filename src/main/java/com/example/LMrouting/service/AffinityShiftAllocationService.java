@@ -55,6 +55,7 @@ public class AffinityShiftAllocationService {
     private final ClusterFirstRouteOptimizer clusterFirstRouteOptimizer;
     private final LegacyRouteOptimizer legacyRouteOptimizer;
     private final EarningsBalancingService earningsBalancingService;
+    private final TerritoryPartitionService territoryPartitionService;
 
     @Value("${hub.name:PNQ HDP}")
     private String hubName;
@@ -162,13 +163,14 @@ public class AffinityShiftAllocationService {
         regionShipments.forEach((region, ships) ->
                 log.info("  Region '{}' → {} shipments", region, ships.size()));
 
-        // ── Phase 5: Dense-pack each region into assigned SRs ─────────────────
+        // ── Phase 5: Territory partitioning per region ─────────────────────────
         Map<String, List<Shipment>> srAssignments = new LinkedHashMap<>();
         for (String sr : presentSrs) srAssignments.put(sr, new ArrayList<>());
 
         List<Shipment> overflowShipments = new ArrayList<>();
         List<String> operationalWarnings = new ArrayList<>();
         Set<String> smallLeftoverRegions = new HashSet<>();
+        Map<String, List<double[]>> allTerritoryBoundaries = new LinkedHashMap<>();
 
         for (Map.Entry<String, List<Shipment>> regionEntry : regionShipments.entrySet()) {
             String regionName = regionEntry.getKey();
@@ -187,20 +189,24 @@ public class AffinityShiftAllocationService {
                 continue;
             }
 
-            DensePackResult packResult = densePackRegion(regionEntry.getValue(), regionSrNames, srShiftDurations);
-            packResult.assignments().forEach((sr, shipments) -> {
+            TerritoryPartitionService.TerritoryResult territoryResult =
+                    territoryPartitionService.partition(
+                            regionEntry.getValue(), regionSrNames, srShiftDurations,
+                            shiftDurationMinutes, targetUtilisation, hubLat, hubLng);
+
+            territoryResult.assignments().forEach((sr, shipments) -> {
                 log.info("AffinityShiftAllocationService: Phase 5 — SR '{}' gets {} shipments from region '{}'",
                         sr, shipments.size(), regionName);
                 srAssignments.get(sr).addAll(shipments);
             });
 
-            if (!packResult.overflow().isEmpty()) {
-                int overflowCount = packResult.overflow().size();
+            // Store territory boundaries for visualization
+            allTerritoryBoundaries.putAll(territoryResult.territoryBoundaries());
+
+            if (!territoryResult.overflow().isEmpty()) {
+                int overflowCount = territoryResult.overflow().size();
 
                 // ── Small leftover guard ──────────────────────────────────────
-                // If overflow < threshold, attempt consolidation into existing SRs
-                // in this region. If consolidation fails, mark as unallocated
-                // rather than activating a new SR.
                 if (overflowCount < leftoverMinThreshold) {
                     log.info("AffinityShiftAllocationService: region '{}' has {} overflow shipments (< threshold {}), attempting consolidation",
                             regionName, overflowCount, leftoverMinThreshold);
@@ -210,9 +216,8 @@ public class AffinityShiftAllocationService {
                     List<Shipment> consolidated = new ArrayList<>();
                     List<Shipment> unconsolidated = new ArrayList<>();
 
-                    for (Shipment s : packResult.overflow()) {
+                    for (Shipment s : territoryResult.overflow()) {
                         boolean placed = false;
-                        // Try SRs in this region sorted by current load descending (fill busiest first)
                         List<String> srsByLoad = regionSrNames.stream()
                                 .filter(sr -> srAssignments.get(sr) != null && !srAssignments.get(sr).isEmpty())
                                 .sorted(Comparator.comparingInt(
@@ -238,15 +243,12 @@ public class AffinityShiftAllocationService {
                     }
 
                     if (!unconsolidated.isEmpty()) {
-                        // Consolidation failed for some shipments — mark as unallocated
-                        // Do NOT activate a new SR for this small leftover count
                         smallLeftoverRegions.add(regionName);
                         String warning = String.format(
                                 "Region %s: %d leftover shipments (< %d threshold) could not be consolidated — marked as unallocated instead of activating a new SR",
                                 regionName, unconsolidated.size(), leftoverMinThreshold);
                         operationalWarnings.add(warning);
                         log.warn("AffinityShiftAllocationService: SMALL LEFTOVER — {}", warning);
-                        // These go directly to trulyUnallocated (handled after Phase 6)
                         overflowShipments.addAll(unconsolidated);
                     }
 
@@ -257,7 +259,7 @@ public class AffinityShiftAllocationService {
                 } else {
                     log.warn("AffinityShiftAllocationService: region '{}' has {} overflow shipments",
                             regionName, overflowCount);
-                    overflowShipments.addAll(packResult.overflow());
+                    overflowShipments.addAll(territoryResult.overflow());
                 }
             }
         }
@@ -336,72 +338,11 @@ public class AffinityShiftAllocationService {
 
         int totalUnallocated = unallocatedByFilter + trulyUnallocated.size();
 
-        // ── Phase 6c: Consolidate tiny allocations (minimum manpower) ─────────
-        // If an SR has very few shipments (< 10), merge them into another SR
-        // in the SAME region that can absorb them. If no SR can absorb them,
-        // mark the shipments as unallocated rather than sending an SR out for
-        // just a handful of deliveries.
-        int minShipmentsThreshold = leftoverMinThreshold;
-
-        for (String sr : new ArrayList<>(presentSrs)) {
-            List<Shipment> srShipments = srAssignments.get(sr);
-            if (srShipments == null || srShipments.isEmpty()) continue;
-            if (srShipments.size() >= minShipmentsThreshold) continue;
-
-            String srRegion = getSrRegion(sr, config);
-            if (srRegion == null) continue;
-
-            // Try to distribute these shipments individually across other SRs in the region
-            List<String> regionSrs = getAssignedSrsForRegion(srRegion, config, presentSrs);
-            List<String> candidateSrs = regionSrs.stream()
-                    .filter(candidate -> !candidate.equals(sr))
-                    .filter(candidate -> srAssignments.get(candidate) != null
-                            && !srAssignments.get(candidate).isEmpty())
-                    .sorted(Comparator.comparingInt(
-                            (String candidate) -> srAssignments.get(candidate).size()).reversed())
-                    .collect(Collectors.toList());
-
-            List<Shipment> placed = new ArrayList<>();
-            List<Shipment> unplaced = new ArrayList<>();
-
-            for (Shipment s : srShipments) {
-                boolean wasPlaced = false;
-                for (String candidate : candidateSrs) {
-                    List<Shipment> current = srAssignments.get(candidate);
-                    List<Shipment> trial = new ArrayList<>(current);
-                    trial.add(s);
-                    ShiftWorkloadCalculatorService.WorkloadResult w =
-                            workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
-                    if (w.totalMinutes() < getShiftDurationForSr(candidate, srShiftDurations)) {
-                        current.add(s);
-                        placed.add(s);
-                        wasPlaced = true;
-                        break;
-                    }
-                }
-                if (!wasPlaced) {
-                    unplaced.add(s);
-                }
-            }
-
-            if (!placed.isEmpty() || !unplaced.isEmpty()) {
-                log.info("AffinityShiftAllocationService: Phase 6c — SR '{}' had {} shipments (< {} threshold): {} consolidated, {} marked unallocated",
-                        sr, srShipments.size(), minShipmentsThreshold, placed.size(), unplaced.size());
-            }
-
-            // Clear this SR's assignment — shipments are either moved or unallocated
-            srAssignments.put(sr, new ArrayList<>());
-
-            if (!unplaced.isEmpty()) {
-                trulyUnallocated.addAll(unplaced);
-                totalUnallocated += unplaced.size();
-                String warning = String.format(
-                        "SR %s: %d shipments (< %d threshold) could not be consolidated into other SRs in region %s — marked as unallocated",
-                        sr, unplaced.size(), minShipmentsThreshold, srRegion);
-                operationalWarnings.add(warning);
-                log.warn("AffinityShiftAllocationService: SMALL ALLOCATION — {}", warning);
-            }
-        }
+        // ── Phase 6c: (DISABLED — superseded by territory partitioning) ────────
+        // Territory partitioning in Phase 5 already handles optimal SR count
+        // determination, so the tiny-allocation consolidation phase is no longer
+        // needed. The territory K-Means algorithm only activates the optimal
+        // number of SRs based on workload estimation.
 
         // ── Phase 7: Route sequencing (strategy-based optimization) ────────────
         RouteOptimizationStrategy routeStrategy = resolveRouteStrategy();
@@ -759,7 +700,8 @@ public class AffinityShiftAllocationService {
         return buildSummary(dateStr, allShipments, presentSrs, orderedAssignments,
                 workloadBySr, srAffinityStatus, allocatedIds.size(), totalUnallocated,
                 overflowShipments.size(), noRegionShipments.size(), config, regionShipments,
-                operationalWarnings, smallLeftoverRegions, earningsImbalanceWarning, srShiftDurations);
+                operationalWarnings, smallLeftoverRegions, earningsImbalanceWarning, srShiftDurations,
+                allTerritoryBoundaries);
     }
 
     // =========================================================================
@@ -1371,7 +1313,8 @@ public class AffinityShiftAllocationService {
                                             List<String> operationalWarnings,
                                             Set<String> smallLeftoverRegions,
                                             boolean earningsImbalanceWarning,
-                                            Map<String, Integer> srShiftDurations) {
+                                            Map<String, Integer> srShiftDurations,
+                                            Map<String, List<double[]>> territoryBoundaries) {
         List<SrSummaryDto> srSummaries = new ArrayList<>();
         int minShipments = Integer.MAX_VALUE, maxShipments = 0;
         long totalShipments = 0;
@@ -1438,7 +1381,8 @@ public class AffinityShiftAllocationService {
                     workload.handlingMinutes(),
                     workload.travelMinutes(),
                     workload.returnToHubMinutes(),
-                    srWarning
+                    srWarning,
+                    territoryBoundaries != null ? territoryBoundaries.get(sr) : null
             ));
         }
 

@@ -67,7 +67,8 @@ class AffinityShiftAllocationServiceTest {
                 pincodeBoundaryService,
                 cfro,
                 new LegacyRouteOptimizer(travelTimeCache),
-                earningsBalancingService
+                earningsBalancingService,
+                new TerritoryPartitionService(workloadCalculator)
         );
         setField(service, "hubLat", HUB_LAT);
         setField(service, "hubLng", HUB_LNG);

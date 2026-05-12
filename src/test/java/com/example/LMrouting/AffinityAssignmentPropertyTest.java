@@ -185,7 +185,8 @@ class AffinityAssignmentPropertyTest {
                 pincodeBoundaryService,
                 cfro,
                 new LegacyRouteOptimizer(cache),
-                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class))
+                new EarningsBalancingService(workloadCalculator, mock(RouteOptimizerService.class)),
+                new TerritoryPartitionService(workloadCalculator)
         );
         setField(service, "hubLat", 18.4600561);
         setField(service, "hubLng", 73.8884305);

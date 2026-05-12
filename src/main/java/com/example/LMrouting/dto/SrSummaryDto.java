@@ -39,7 +39,9 @@ public record SrSummaryDto(
         Double travelTimeMinutes,           // null in count-based
         Double returnToHubTimeMinutes,      // null in count-based
         // ── Operational warning (null if no issue) ────────────────────────────
-        String operationalWarning           // "OVERLOADED" | "IDLE" | null
+        String operationalWarning,          // "OVERLOADED" | "IDLE" | null
+        // ── Territory boundary (null in count-based mode) ─────────────────────
+        List<double[]> territoryBoundary    // convex hull [lat,lng] pairs (null in count-based)
 ) {
     /**
      * Backward-compatible constructor for callers that don't supply earnings fields.
@@ -49,7 +51,7 @@ public record SrSummaryDto(
                         List<String> pincodesCovered) {
         this(srName, shipmentCount, heavyShipmentCount, compositeLoadScore,
              estimatedDistanceKm, pincodesCovered, 0.0, 0.0, 0.0,
-             null, null, null, null, null, null, null);
+             null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -61,7 +63,7 @@ public record SrSummaryDto(
                         double grossPayout, double fuelCost, double netEarnings) {
         this(srName, shipmentCount, heavyShipmentCount, compositeLoadScore,
              estimatedDistanceKm, pincodesCovered, grossPayout, fuelCost, netEarnings,
-             null, null, null, null, null, null, null);
+             null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -77,6 +79,24 @@ public record SrSummaryDto(
         this(srName, shipmentCount, heavyShipmentCount, compositeLoadScore,
              estimatedDistanceKm, pincodesCovered, grossPayout, fuelCost, netEarnings,
              affinityStatus, estimatedWorkloadMinutes, shiftUtilisationPct,
-             handlingTimeMinutes, travelTimeMinutes, returnToHubTimeMinutes, null);
+             handlingTimeMinutes, travelTimeMinutes, returnToHubTimeMinutes, null, null);
+    }
+
+    /**
+     * Backward-compatible constructor with operationalWarning but without territoryBoundary.
+     */
+    public SrSummaryDto(String srName, int shipmentCount, int heavyShipmentCount,
+                        double compositeLoadScore, double estimatedDistanceKm,
+                        List<String> pincodesCovered,
+                        double grossPayout, double fuelCost, double netEarnings,
+                        String affinityStatus, Double estimatedWorkloadMinutes,
+                        Double shiftUtilisationPct, Double handlingTimeMinutes,
+                        Double travelTimeMinutes, Double returnToHubTimeMinutes,
+                        String operationalWarning) {
+        this(srName, shipmentCount, heavyShipmentCount, compositeLoadScore,
+             estimatedDistanceKm, pincodesCovered, grossPayout, fuelCost, netEarnings,
+             affinityStatus, estimatedWorkloadMinutes, shiftUtilisationPct,
+             handlingTimeMinutes, travelTimeMinutes, returnToHubTimeMinutes,
+             operationalWarning, null);
     }
 }
