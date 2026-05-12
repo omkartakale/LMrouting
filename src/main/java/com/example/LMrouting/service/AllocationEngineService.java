@@ -5,6 +5,7 @@ import com.example.LMrouting.exception.AllocationNotFoundException;
 import com.example.LMrouting.exception.NoPresentSrsException;
 import com.example.LMrouting.model.AllocationRun;
 import com.example.LMrouting.model.AllocationStatus;
+import com.example.LMrouting.model.Priority;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.store.InMemoryStore;
 import lombok.RequiredArgsConstructor;
@@ -213,16 +214,28 @@ public class AllocationEngineService {
                 outsideBoundary,
                 presentSrs.size());
 
-        // ── Capacity cap with payout-sorted selection ─────────────────────────
+        // ── Capacity cap with effective-payout-sorted selection ───────────────
         // Total capacity scales with the number of present SRs.
         // If 10 SRs are present, capacity = 10 × 80 = 800.
         // If 3 SRs are present, capacity = 3 × 80 = 240.
         //
-        // IMPORTANT: When capacity is exceeded, we select the highest-payout
-        // shipments first (sorted by expectedPayout descending). This ensures
-        // the best-value deliveries are always allocated, maximising SR earnings
-        // and minimising the chance of negative net earnings from low-value
-        // shipments with long routes.
+        // SELECTION RULE — sort by effectivePayout descending only, with
+        // shippingId ascending as a deterministic stable tiebreaker.
+        //
+        //   effectivePayout = expectedPayout × priorityFactor
+        //                       (P0=1.00, P1=0.75, P2=0.50)
+        //
+        // This naturally enforces "1 P0 should NOT be sacrificed for 4 P2 unless
+        // those 4 P2s genuinely earn more in total":
+        //   1 P0 with payout ₹X  → effective ₹X × 1.00 = ₹X
+        //   4 P2 with payout ₹X  → effective 4 × ₹X × 0.50 = ₹2X
+        // So a P0 only loses its slot when the displacing P2s' combined
+        // effective payout truly exceeds the P0's effective payout — which
+        // is exactly when keeping them improves total earnings.
+        //
+        // We do NOT sort by priority tier first; that would let a low-payout
+        // P0 displace any number of high-payout P2s, hurting overall earnings
+        // and route distance, which is not the desired trade-off.
         int totalCapacity = presentSrs.size() * srCapacityMax;
         List<Shipment> toAllocate;
         List<Shipment> unallocated;
@@ -230,10 +243,9 @@ public class AllocationEngineService {
             log.warn("Capacity exceeded: {} shipments > {} capacity ({} SRs × {}). {} will be unallocated.",
                     withinBoundary.size(), totalCapacity, presentSrs.size(), srCapacityMax,
                     withinBoundary.size() - totalCapacity);
-            // Sort by expectedPayout descending, then shippingId ascending as a stable tiebreaker
-            // to guarantee deterministic selection when two shipments have equal payout.
             List<Shipment> sorted = withinBoundary.stream()
-                    .sorted(Comparator.comparingDouble(Shipment::getExpectedPayout).reversed()
+                    .sorted(Comparator
+                            .comparingDouble(Shipment::effectivePayout).reversed()
                             .thenComparing(Shipment::getShippingId))
                     .collect(Collectors.toList());
             toAllocate  = new ArrayList<>(sorted.subList(0, totalCapacity));
@@ -353,11 +365,14 @@ public class AllocationEngineService {
 
         store.saveAllocationRun(run);
 
+        PriorityCountsDto priorityCounts = computePriorityCounts(allShipments, allocatedIds);
+
         return buildSummary(dateStr, allShipments.size(), presentSrs.size(),
                 legacyVariance, earningsVar, earningsRange, meanEarnings,
                 ordered, distancesBySr, earningsBySr,
                 // Total unallocated = capacity overflow + outside boundary + zero/missing coords
-                unallocated.size() + outsideBoundary + (allShipments.size() - withCoords.size()));
+                unallocated.size() + outsideBoundary + (allShipments.size() - withCoords.size()),
+                priorityCounts);
     }
 
     public AllocationSummary getSummary(LocalDate date) {
@@ -390,9 +405,16 @@ public class AllocationEngineService {
                 CompositeLoadScoreCalculator.compute(list, distancesBySr.getOrDefault(sr, 0.0), scoreWeights)));
         double legacyVariance = CompositeLoadScoreCalculator.variance(scoresBySr);
 
+        // Re-derive priority counts from the persisted shipment list.
+        Set<String> allocatedIds = bySr.values().stream()
+                .flatMap(List::stream)
+                .map(Shipment::getShippingId)
+                .collect(Collectors.toSet());
+        PriorityCountsDto priorityCounts = computePriorityCounts(all, allocatedIds);
+
         return buildSummary(dateStr, run.getTotalShipments(), run.getTotalSrs(),
                 legacyVariance, earningsVar, earningsRange, meanEarnings,
-                bySr, distancesBySr, earningsBySr, 0);
+                bySr, distancesBySr, earningsBySr, 0, priorityCounts);
     }
 
     public List<double[]> getRoutePolyline(LocalDate date, String srName) {
@@ -921,7 +943,8 @@ public class AllocationEngineService {
                                            Map<String, List<Shipment>> assignment,
                                            Map<String, Double> distancesBySr,
                                            Map<String, Double> earningsBySr,
-                                           int unallocatedShipments) {
+                                           int unallocatedShipments,
+                                           PriorityCountsDto priorityCounts) {
 
         Map<String, Double> scoresBySr = new LinkedHashMap<>();
         assignment.forEach((sr, list) ->
@@ -979,7 +1002,53 @@ public class AllocationEngineService {
                 srSummaries,
                 earningsVar,
                 earningsRange,
-                meanEarnings);
+                meanEarnings,
+                /* allocationMode        */ null,
+                /* shiftDurationMinutes  */ null,
+                /* overflowShipments     */ null,
+                /* noRegionShipments     */ null,
+                /* regionSummaries       */ null,
+                /* operationalWarnings   */ null,
+                /* earningsImbalanceWarn */ null,
+                /* priorityCounts        */ priorityCounts);
+    }
+
+    /**
+     * Tally how many shipments fall in each priority tier (P0/P1/P2) and
+     * how many of those were actually allocated. Unallocated counts are
+     * computed as {@code total - allocated} per tier.
+     *
+     * <p>Shipments with a {@code null} priority are treated as P2 (the
+     * documented default when the CSV column is missing).
+     */
+    private PriorityCountsDto computePriorityCounts(List<Shipment> allShipments,
+                                                    Set<String> allocatedIds) {
+        int p0Total = 0, p0Alloc = 0;
+        int p1Total = 0, p1Alloc = 0;
+        int p2Total = 0, p2Alloc = 0;
+        for (Shipment s : allShipments) {
+            Priority pr = s.getPriority() == null ? Priority.P2 : s.getPriority();
+            boolean isAllocated = allocatedIds.contains(s.getShippingId());
+            switch (pr) {
+                case P0:
+                    p0Total++;
+                    if (isAllocated) p0Alloc++;
+                    break;
+                case P1:
+                    p1Total++;
+                    if (isAllocated) p1Alloc++;
+                    break;
+                case P2:
+                default:
+                    p2Total++;
+                    if (isAllocated) p2Alloc++;
+                    break;
+            }
+        }
+        return new PriorityCountsDto(
+                p0Total, p0Alloc, p0Total - p0Alloc,
+                p1Total, p1Alloc, p1Total - p1Alloc,
+                p2Total, p2Alloc, p2Total - p2Alloc);
     }
 
     // =========================================================================

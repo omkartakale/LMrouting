@@ -47,7 +47,11 @@ public record AllocationSummary(
         // ── Operational warnings (null in count-based mode) ───────────────────
         List<String> operationalWarnings,  // no-SR region warnings, overloaded/idle SR warnings
         // ── Earnings imbalance warning (null in count-based mode) ─────────────
-        Boolean earningsImbalanceWarning   // true when > 50% of SRs exceed ±20% of median earnings
+        Boolean earningsImbalanceWarning,   // true when > 50% of SRs exceed ±20% of median earnings
+        // ── Priority tier breakdown (P0/P1/P2 counts) ─────────────────────────
+        // total, allocated, and unallocated counts per priority tier. Null only
+        // for very old persisted summaries that pre-date the priority feature.
+        PriorityCountsDto priorityCounts
 ) {
     /**
      * Backward-compatible constructor without earnings metrics or time-based fields.
@@ -61,7 +65,7 @@ public record AllocationSummary(
              capacityRangeMin, capacityRangeMax,
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, 0.0, 0.0, 0.0,
-             null, null, null, null, null, null, null);
+             null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -77,7 +81,7 @@ public record AllocationSummary(
              capacityRangeMin, capacityRangeMax,
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
-             null, null, null, null, null, null, null);
+             null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -97,7 +101,7 @@ public record AllocationSummary(
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
              allocationMode, shiftDurationMinutes, overflowShipments, noRegionShipments,
-             regionSummaries, null, null);
+             regionSummaries, null, null, null);
     }
 
     /**
@@ -118,6 +122,28 @@ public record AllocationSummary(
              totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
              fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
              allocationMode, shiftDurationMinutes, overflowShipments, noRegionShipments,
-             regionSummaries, operationalWarnings, null);
+             regionSummaries, operationalWarnings, null, null);
+    }
+
+    /**
+     * Backward-compatible constructor with earningsImbalanceWarning but without priorityCounts.
+     */
+    public AllocationSummary(String date, int totalShipments, int allocatedShipments,
+                              int unallocatedShipments, int capacityRangeMin, int capacityRangeMax,
+                              int totalSrs, int minShipmentsPerSr, int maxShipmentsPerSr,
+                              double avgShipmentsPerSr, double fairnessVariance,
+                              List<SrSummaryDto> srSummaries,
+                              double earningsVariance, double earningsRange, double meanNetEarnings,
+                              String allocationMode, Integer shiftDurationMinutes,
+                              Integer overflowShipments, Integer noRegionShipments,
+                              List<RegionSummaryDto> regionSummaries,
+                              List<String> operationalWarnings,
+                              Boolean earningsImbalanceWarning) {
+        this(date, totalShipments, allocatedShipments, unallocatedShipments,
+             capacityRangeMin, capacityRangeMax,
+             totalSrs, minShipmentsPerSr, maxShipmentsPerSr, avgShipmentsPerSr,
+             fairnessVariance, srSummaries, earningsVariance, earningsRange, meanNetEarnings,
+             allocationMode, shiftDurationMinutes, overflowShipments, noRegionShipments,
+             regionSummaries, operationalWarnings, earningsImbalanceWarning, null);
     }
 }

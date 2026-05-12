@@ -3,6 +3,7 @@ package com.example.LMrouting.service;
 import com.example.LMrouting.dto.AllocateRequest;
 import com.example.LMrouting.dto.AllocationSummary;
 import com.example.LMrouting.dto.HubBoundaryResponse;
+import com.example.LMrouting.dto.PriorityCountsDto;
 import com.example.LMrouting.dto.RegionSummaryDto;
 import com.example.LMrouting.dto.SrRebalanceSuggestion;
 import com.example.LMrouting.dto.SrSummaryDto;
@@ -1432,6 +1433,28 @@ public class AffinityShiftAllocationService {
             earningsVariance = 0.0;
         }
 
+        // ── Priority tier breakdown (P0/P1/P2) ────────────────────────────────
+        // Count totals from allShipments and allocated from orderedAssignments.
+        java.util.Set<String> allocatedIds = new java.util.HashSet<>();
+        for (List<Shipment> list : orderedAssignments.values()) {
+            for (Shipment s : list) allocatedIds.add(s.getShippingId());
+        }
+        int p0T = 0, p0A = 0, p1T = 0, p1A = 0, p2T = 0, p2A = 0;
+        for (Shipment s : allShipments) {
+            com.example.LMrouting.model.Priority pr = s.getPriority() == null
+                    ? com.example.LMrouting.model.Priority.P2 : s.getPriority();
+            boolean alloc = allocatedIds.contains(s.getShippingId());
+            switch (pr) {
+                case P0: p0T++; if (alloc) p0A++; break;
+                case P1: p1T++; if (alloc) p1A++; break;
+                default: p2T++; if (alloc) p2A++; break;
+            }
+        }
+        PriorityCountsDto priorityCounts = new PriorityCountsDto(
+                p0T, p0A, p0T - p0A,
+                p1T, p1A, p1T - p1A,
+                p2T, p2A, p2T - p2A);
+
         return new AllocationSummary(
                 dateStr,
                 allShipments.size(),
@@ -1451,7 +1474,8 @@ public class AffinityShiftAllocationService {
                 noRegionCount,
                 regionSummaryList,
                 operationalWarnings,
-                earningsImbalanceWarning
+                earningsImbalanceWarning,
+                priorityCounts
         );
     }
 

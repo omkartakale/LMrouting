@@ -49,4 +49,26 @@ public class Shipment {
 
     // Actual Haversine distance from hub (computed during ingestion)
     private double distanceFromHubKm;
+
+    // ── Priority tier (P0/P1/P2) ─────────────────────────────────────────────
+    // Read from the CSV "Priority" column (case-insensitive). Defaults to P2
+    // when the column is absent or the value cannot be parsed. The priority
+    // factor (P0=1.00, P1=0.75, P2=0.50) weights the effective payout used by
+    // the allocation engine when capacity is exceeded and during fairness
+    // rebalancing — higher priority shipments are retained preferentially.
+    @Builder.Default
+    private Priority priority = Priority.P2;
+
+    /**
+     * Effective payout = expectedPayout × priority factor.
+     *
+     * <p>This is the value the allocation engine uses to (a) sort shipments
+     * when capacity is exceeded, and (b) compute gross payout during fairness
+     * rebalancing. P0 shipments retain 100% of their payout, P1 retain 75%,
+     * and P2 retain 50% — so the engine naturally prefers retaining P0s.
+     */
+    public double effectivePayout() {
+        Priority p = priority == null ? Priority.P2 : priority;
+        return expectedPayout * p.getFactor();
+    }
 }

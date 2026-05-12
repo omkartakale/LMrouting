@@ -42,12 +42,26 @@ public class CompositeLoadScoreCalculator {
     // =========================================================================
 
     /**
-     * Compute the gross payout for a list of shipments (sum of expectedPayout).
+     * Compute the gross payout for a list of shipments — using the priority-weighted
+     * {@code effectivePayout} so that the fairness rebalancer values P0 shipments
+     * more than P1/P2. This is what drives the engine to keep P0 distribution
+     * balanced across SRs and to retain P0s ahead of P2s when capacity is tight.
+     *
+     * <pre>effectivePayout = expectedPayout × priorityFactor (P0=1.00, P1=0.75, P2=0.50)</pre>
      *
      * @param shipments shipments assigned to one SR
-     * @return total expected payout in ₹
+     * @return total effective payout in ₹
      */
     public static double grossPayout(List<Shipment> shipments) {
+        if (shipments == null || shipments.isEmpty()) return 0.0;
+        return shipments.stream().mapToDouble(Shipment::effectivePayout).sum();
+    }
+
+    /**
+     * Sum of <em>raw</em> expectedPayout (no priority weighting) — kept for
+     * reporting/UI when callers want the un-weighted figure.
+     */
+    public static double rawGrossPayout(List<Shipment> shipments) {
         if (shipments == null || shipments.isEmpty()) return 0.0;
         return shipments.stream().mapToDouble(Shipment::getExpectedPayout).sum();
     }

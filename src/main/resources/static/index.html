@@ -54,6 +54,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;h
 #upload-btn:disabled{background:#90a4ae;cursor:not-allowed}
 .spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* ── Allocation loading overlay ────────────────────────────────────────────
+   Full-screen translucent backdrop shown while /api/allocate is in flight.
+   Blocks clicks on map + sidebar so users can't double-trigger requests. */
+#alloc-loading-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:99999;animation:fadeIn .25s ease-out}
+#alloc-loading-overlay.show{display:flex}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.alloc-loading-card{background:#fff;border-radius:14px;padding:26px 34px;box-shadow:0 14px 40px rgba(0,0,0,.35);min-width:300px;max-width:420px;text-align:center}
+.alloc-loading-card .ring{width:56px;height:56px;margin:0 auto 14px;border:5px solid #e3f2fd;border-top-color:#1976d2;border-right-color:#1976d2;border-radius:50%;animation:spin .9s linear infinite}
+.alloc-loading-card .title{font-size:1rem;font-weight:700;color:#0d47a1;margin-bottom:5px}
+.alloc-loading-card .sub{font-size:.82rem;color:#546e7a;line-height:1.45}
+.alloc-loading-card .stage{margin-top:12px;font-size:.74rem;color:#1976d2;font-weight:600;letter-spacing:.3px;text-transform:uppercase;min-height:14px}
+.alloc-loading-card .bar{margin-top:10px;height:5px;background:#e3f2fd;border-radius:3px;overflow:hidden;position:relative}
+.alloc-loading-card .bar::before{content:'';position:absolute;top:0;left:-40%;width:40%;height:100%;background:linear-gradient(90deg,transparent,#1976d2,transparent);animation:slide 1.3s ease-in-out infinite}
+@keyframes slide{to{left:100%}}
 .result-card{margin-top:8px;padding:10px;border-radius:8px;font-size:.8rem}
 .result-card.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
 .result-card.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
@@ -246,6 +260,17 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
   </style>
 </head>
 <body>
+
+<!-- Full-screen loading overlay shown while allocation API is in flight -->
+<div id="alloc-loading-overlay" role="dialog" aria-modal="true" aria-live="polite" aria-label="Allocation in progress">
+  <div class="alloc-loading-card">
+    <div class="ring"></div>
+    <div class="title" id="alloc-loading-title">Running allocation…</div>
+    <div class="sub" id="alloc-loading-sub">Optimising routes and balancing earnings across SRs.</div>
+    <div class="stage" id="alloc-loading-stage">Initialising</div>
+    <div class="bar"></div>
+  </div>
+</div>
 
 <header id="header">
   <h1>&#x1F69A; Shipment Allocation Optimizer v3</h1>
@@ -894,19 +919,24 @@ function syncToGoogleMap() {
 
     if (layer.osmPolyline) {
       var latlngs = layer.osmPolyline.getLatLngs();
-      var path = latlngs.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
+      // Re-stitch when copying to Google to bridge any rendering-engine quirks.
+      var raw = latlngs.map(function(ll) { return [ll.lat, ll.lng]; });
+      var stitched = stitchPolyline(raw, HUB_LAT, HUB_LNG, 250);
+      var path = stitched.map(function(p) { return { lat: p[0], lng: p[1] }; });
       gmapPolylines.push(new google.maps.Polyline({
         path: path, geodesic: true,
-        strokeColor: color, strokeOpacity: 0.8, strokeWeight: 3,
+        strokeColor: color, strokeOpacity: 0.9, strokeWeight: 3.5,
         map: gmap, zIndex: 2
       }));
     }
     if (layer.googlePolyline) {
       var latlngs2 = layer.googlePolyline.getLatLngs();
-      var path2 = latlngs2.map(function(ll) { return { lat: ll.lat, lng: ll.lng }; });
+      var raw2 = latlngs2.map(function(ll) { return [ll.lat, ll.lng]; });
+      var stitched2 = stitchPolyline(raw2, HUB_LAT, HUB_LNG, 250);
+      var path2 = stitched2.map(function(p) { return { lat: p[0], lng: p[1] }; });
       gmapPolylines.push(new google.maps.Polyline({
         path: path2, geodesic: true,
-        strokeColor: '#1b8a3c', strokeOpacity: 0.85, strokeWeight: 4,
+        strokeColor: color, strokeOpacity: 0.95, strokeWeight: 4,
         icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }],
         map: gmap, zIndex: 2
       }));
@@ -1665,6 +1695,45 @@ function addNewSr() {
     .catch(function(e) { showAllocError('Add SR failed: ' + e.message); });
 }
 
+// ── ALLOCATION LOADING OVERLAY ────────────────────────────────────────────────
+// Animated stage messages that cycle while the request is in flight. The
+// real backend doesn't expose progress events, so the messages are a
+// best-effort hint that the engine is doing meaningful work (not a hang).
+var allocLoadingStages = [
+  'Filtering shipments by hub & pincode boundary',
+  'Sorting by priority + effective payout',
+  'Clustering shipments to SR territories',
+  'Rebalancing earnings across SRs',
+  'Co-locating Forward & Reverse shipments',
+  'Sequencing routes (nearest-neighbour + 2-opt)',
+  'Fetching road geometry from routing provider'
+];
+var allocLoadingTimer = null;
+
+function showAllocLoading(modeLabel) {
+  var ov = document.getElementById('alloc-loading-overlay');
+  if (!ov) return;
+  document.getElementById('alloc-loading-title').textContent = 'Running allocation (' + modeLabel + ')…';
+  document.getElementById('alloc-loading-sub').textContent =
+    'Optimising routes and balancing earnings across SRs. This may take a few seconds for large datasets.';
+  var stageEl = document.getElementById('alloc-loading-stage');
+  var i = 0;
+  stageEl.textContent = allocLoadingStages[0];
+  if (allocLoadingTimer) clearInterval(allocLoadingTimer);
+  allocLoadingTimer = setInterval(function() {
+    i = (i + 1) % allocLoadingStages.length;
+    stageEl.textContent = allocLoadingStages[i];
+  }, 1400);
+  ov.classList.add('show');
+}
+
+function hideAllocLoading() {
+  var ov = document.getElementById('alloc-loading-overlay');
+  if (!ov) return;
+  ov.classList.remove('show');
+  if (allocLoadingTimer) { clearInterval(allocLoadingTimer); allocLoadingTimer = null; }
+}
+
 // ── ALLOCATION ────────────────────────────────────────────────────────────────
 function runAllocation(mode) {
   var date = document.getElementById('date-select').value;
@@ -1677,6 +1746,7 @@ function runAllocation(mode) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Running (' + label + ')...';
   hideAllocError();
+  showAllocLoading(label);
 
   // Clear only the polylines for this mode, keep markers
   clearPolylinesByMode(mode);
@@ -1692,6 +1762,7 @@ function runAllocation(mode) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     if (!res.ok) {
+      hideAllocLoading();
       // 9.9: mode-aware error message
       if (getAllocationMode() === 'time-based') {
         showAllocError('Allocation failed. Please check your affinity configuration. (' + res.status + ')');
@@ -1715,12 +1786,16 @@ function runAllocation(mode) {
     renderSrList(res.data.srSummaries);
     renderRegionHealth(res.data);
     lmShowPanel(res.data.srSummaries);
-    renderAllSrsOnMap(res.data.srSummaries, date, mode);
+    // Update overlay text to indicate polyline-fetching phase
+    var stageEl = document.getElementById('alloc-loading-stage');
+    if (stageEl) stageEl.textContent = 'Fetching road geometry for each SR…';
+    renderAllSrsOnMap(res.data.srSummaries, date, mode, function() { hideAllocLoading(); });
     showAllocInfo('Allocation complete using ' + label + '. ' + (mode === 'osm' && googleMapsConfigured ? 'You can also run Google Maps allocation to compare.' : ''));
   })
   .catch(function(e) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
+    hideAllocLoading();
     // 9.9: mode-aware error message
     if (getAllocationMode() === 'time-based') {
       showAllocError('Allocation failed. Please check your affinity configuration.');
@@ -1786,6 +1861,33 @@ function renderSummary(s) {
       '</div>';
   }
 
+  // ── Priority breakdown panel (P0/P1/P2 totals + allocated + unallocated) ─
+  // Shows tiered counts so the operator can confirm the engine retained the
+  // maximum possible number of P0 shipments. The block renders even when the
+  // server returns a default-all-P2 payload (no Priority column in CSV).
+  var priorityHtml = '';
+  if (s.priorityCounts) {
+    var pc = s.priorityCounts;
+    priorityHtml =
+      '<div style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+      '<div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:7px">' +
+        '&#x1F3F7;&#xFE0F; Priority Breakdown (P0 > P1 > P2)' +
+      '</div>' +
+      '<div class="summary-stats" style="grid-template-columns:1fr 1fr 1fr">' +
+        priorityBox('P0', pc.p0Total, pc.p0Allocated, pc.p0Unallocated,
+                    '#b71c1c', '#ffebee', '#ef9a9a') +
+        priorityBox('P1', pc.p1Total, pc.p1Allocated, pc.p1Unallocated,
+                    '#ef6c00', '#fff3e0', '#ffcc80') +
+        priorityBox('P2', pc.p2Total, pc.p2Allocated, pc.p2Unallocated,
+                    '#1565c0', '#e3f2fd', '#90caf9') +
+      '</div>' +
+      '<div style="margin-top:7px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:7px;padding:8px 10px;font-size:.78rem;color:#1b5e20">' +
+        '&#x2705; Engine retains the <b>maximum P0 shipments</b> first (P0 &gt; P1 &gt; P2), ' +
+        'then highest effective payout, when capacity is exceeded.' +
+      '</div>' +
+      '</div>';
+  }
+
   document.getElementById('summary-stats').innerHTML = coreHtml;
   // Append earnings section after the grid
   var panel = document.getElementById('summary-panel');
@@ -1797,6 +1899,28 @@ function renderSummary(s) {
     div.innerHTML = earningsHtml;
     panel.appendChild(div);
   }
+  // Append (or refresh) priority breakdown section
+  var existingPriority = panel.querySelector('.priority-section');
+  if (existingPriority) existingPriority.remove();
+  if (priorityHtml) {
+    var pdiv = document.createElement('div');
+    pdiv.className = 'priority-section';
+    pdiv.innerHTML = priorityHtml;
+    panel.appendChild(pdiv);
+  }
+}
+
+// Render one tier card with total / allocated / unallocated counts stacked.
+function priorityBox(tier, total, allocated, unallocated, textColor, bgColor, borderColor) {
+  var unalSty = unallocated > 0
+      ? 'color:#c62828;font-weight:700'
+      : 'color:' + textColor + ';font-weight:600';
+  return '<div class="stat-box" style="background:' + bgColor + ';border-color:' + borderColor + ';text-align:left;padding:7px 9px">' +
+    '<div style="font-size:.78rem;font-weight:700;color:' + textColor + ';margin-bottom:3px">' + tier + '</div>' +
+    '<div style="font-size:.7rem;color:#555;display:flex;justify-content:space-between"><span>Total</span><b style="color:' + textColor + '">' + total + '</b></div>' +
+    '<div style="font-size:.7rem;color:#555;display:flex;justify-content:space-between"><span>Allocated</span><b style="color:#1b5e20">' + allocated + '</b></div>' +
+    '<div style="font-size:.7rem;color:#555;display:flex;justify-content:space-between"><span>Unallocated</span><b style="' + unalSty + '">' + unallocated + '</b></div>' +
+    '</div>';
 }
 
 function earningsBox(title, value, label, textColor, bgColor, borderColor) {
@@ -1907,7 +2031,7 @@ function renderSrList(srSummaries) {
 }
 
 // ── MAP RENDERING ─────────────────────────────────────────────────────────────
-function renderAllSrsOnMap(srSummaries, date, mode) {
+function renderAllSrsOnMap(srSummaries, date, mode, onComplete) {
   // Clear markers only on first allocation; on second just add polylines
   if (!hasOsmAllocation || !hasGoogleAllocation) clearMarkers();
 
@@ -1935,6 +2059,11 @@ function renderAllSrsOnMap(srSummaries, date, mode) {
     if (i >= srSummaries.length) {
       // Sync to Google Map if active
       if (activeMapProvider === 'google') syncToGoogleMap();
+      // Notify caller that all per-SR polylines have arrived — used to dismiss
+      // the allocation loading overlay only after the map is fully drawn.
+      if (typeof onComplete === 'function') {
+        try { onComplete(); } catch (e) { /* ignore */ }
+      }
       return;
     }
     var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
@@ -2017,6 +2146,95 @@ function addMarkersForSr(srName, route, color, index, date) {
   });
 }
 
+// ── Route polyline stitching helpers ──────────────────────────────────────────
+// The server returns [lat,lng] pairs from ORS / Google overview_polyline. Those
+// raw arrays sometimes contain (a) duplicate adjacent vertices, (b) tiny zero-
+// length wiggles, and (c) gaps between successive sample points when the
+// upstream simplification was aggressive. The helpers below clean and "stitch"
+// the raw points so the rendered route looks continuous on both Leaflet and
+// Google overlays without altering geometry meaningfully.
+
+// Haversine distance in metres — used to decide when to bridge a gap.
+function _haversineM(lat1, lng1, lat2, lng2) {
+  var R = 6371000;
+  var toRad = function(d) { return d * Math.PI / 180; };
+  var dLat = toRad(lat2 - lat1);
+  var dLng = toRad(lng2 - lng1);
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2))
+        * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/**
+ * Stitch a raw polyline into a continuous, render-friendly path.
+ *   1. Drop invalid / NaN points and adjacent duplicates (< 0.5 m apart).
+ *   2. Pin start and end to the actual hub location so the route visually
+ *      meets the hub marker without a leftover gap.
+ *   3. Bridge gaps > maxGapM by inserting linearly-interpolated mid-points
+ *      every ~maxGapM metres. This keeps the line solid even when the
+ *      upstream geometry was sampled too sparsely.
+ *
+ * Returns an array of [lat,lng] pairs ready for L.polyline.
+ */
+function stitchPolyline(rawCoords, hubLat, hubLng, maxGapM) {
+  if (!rawCoords || !rawCoords.length) return [];
+  maxGapM = maxGapM || 250; // anything beyond ~250 m looks like a gap on city zoom
+
+  // 1. Coerce + filter invalid points
+  var clean = [];
+  for (var i = 0; i < rawCoords.length; i++) {
+    var p = rawCoords[i];
+    if (!p || p.length < 2) continue;
+    var lat = +p[0], lng = +p[1];
+    if (!isFinite(lat) || !isFinite(lng)) continue;
+    if (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) continue; // (0,0)
+    if (clean.length) {
+      var last = clean[clean.length - 1];
+      if (_haversineM(last[0], last[1], lat, lng) < 0.5) continue; // duplicate
+    }
+    clean.push([lat, lng]);
+  }
+  if (clean.length < 2) {
+    // Single point — extend to hub so we still draw something useful
+    if (clean.length === 1 && hubLat != null && hubLng != null) {
+      return [[hubLat, hubLng], clean[0], [hubLat, hubLng]];
+    }
+    return clean;
+  }
+
+  // 2. Snap endpoints to hub (only when first/last sample is already close)
+  if (hubLat != null && hubLng != null) {
+    var firstD = _haversineM(clean[0][0], clean[0][1], hubLat, hubLng);
+    var lastD  = _haversineM(clean[clean.length - 1][0], clean[clean.length - 1][1], hubLat, hubLng);
+    // If the first sample is within ~150 m of the hub, replace it; else prepend
+    if (firstD < 150) clean[0] = [hubLat, hubLng];
+    else clean.unshift([hubLat, hubLng]);
+    if (lastD < 150) clean[clean.length - 1] = [hubLat, hubLng];
+    else clean.push([hubLat, hubLng]);
+  }
+
+  // 3. Bridge gaps with linear interpolation
+  var stitched = [clean[0]];
+  for (var j = 1; j < clean.length; j++) {
+    var a = stitched[stitched.length - 1];
+    var b = clean[j];
+    var d = _haversineM(a[0], a[1], b[0], b[1]);
+    if (d > maxGapM) {
+      var steps = Math.ceil(d / maxGapM);
+      for (var k = 1; k < steps; k++) {
+        var t = k / steps;
+        stitched.push([
+          a[0] + (b[0] - a[0]) * t,
+          a[1] + (b[1] - a[1]) * t
+        ]);
+      }
+    }
+    stitched.push(b);
+  }
+  return stitched;
+}
+
 function addPolylineForSr(srName, polyCoords, color, mode) {
   if (!srLayers[srName]) srLayers[srName] = { markers: [], osmPolyline: null, googlePolyline: null, color: color, index: 0 };
   // Remove old polyline for this mode
@@ -2025,24 +2243,37 @@ function addPolylineForSr(srName, polyCoords, color, mode) {
 
   // Both OSM and Google Maps use the SR's own color.
   // OSM = solid line, Google Maps = dashed line (same color, different style).
-  var osmOpts    = { color: color, weight: 4, opacity: 0.85 };
-  var googleOpts = { color: color, weight: 4, opacity: 0.85, dashArray: '10,6' };
-  var fallbackOsmOpts    = { color: color, weight: 3, opacity: 0.6, dashArray: '4,3' };
-  var fallbackGoogleOpts = { color: color, weight: 3, opacity: 0.6, dashArray: '10,6' };
+  // smoothFactor + lineJoin: round give a much cleaner look at all zooms.
+  var osmOpts    = { color: color, weight: 4, opacity: 0.9, smoothFactor: 1.2,
+                     lineCap: 'round', lineJoin: 'round' };
+  var googleOpts = { color: color, weight: 4, opacity: 0.9, dashArray: '10,6',
+                     smoothFactor: 1.2, lineCap: 'round', lineJoin: 'round' };
+  var fallbackOsmOpts    = { color: color, weight: 3, opacity: 0.65, dashArray: '4,3',
+                             lineCap: 'round', lineJoin: 'round' };
+  var fallbackGoogleOpts = { color: color, weight: 3, opacity: 0.65, dashArray: '10,6',
+                             lineCap: 'round', lineJoin: 'round' };
 
   var polyline;
   if (polyCoords && polyCoords.length > 1) {
-    var opts = mode === 'google' ? googleOpts : osmOpts;
-    polyline = L.polyline(polyCoords.map(function(p) { return [p[0], p[1]]; }), opts).addTo(map);
-  } else {
-    // Straight-line fallback using marker positions
-    var stops = srLayers[srName].markers.map(function(m) { return m.getLatLng(); });
+    // Stitch & smooth the raw geometry so consecutive segments are continuous
+    var clean = stitchPolyline(polyCoords, HUB_LAT, HUB_LNG, 250);
+    if (clean.length > 1) {
+      var opts = mode === 'google' ? googleOpts : osmOpts;
+      polyline = L.polyline(clean, opts).addTo(map);
+    }
+  }
+  if (!polyline) {
+    // Straight-line fallback using marker positions, also stitched
+    var stops = srLayers[srName].markers.map(function(m) {
+      // Use the marker's original (un-jittered) coordinates when present
+      return [m.options.origLat != null ? m.options.origLat : m.getLatLng().lat,
+              m.options.origLng != null ? m.options.origLng : m.getLatLng().lng];
+    });
     if (stops.length) {
-      var path = [[HUB_LAT, HUB_LNG]]
-        .concat(stops.map(function(ll) { return [ll.lat, ll.lng]; }))
-        .concat([[HUB_LAT, HUB_LNG]]);
+      var rawPath = [[HUB_LAT, HUB_LNG]].concat(stops).concat([[HUB_LAT, HUB_LNG]]);
+      var stitched = stitchPolyline(rawPath, HUB_LAT, HUB_LNG, 800);
       var fbOpts = mode === 'google' ? fallbackGoogleOpts : fallbackOsmOpts;
-      polyline = L.polyline(path, fbOpts).addTo(map);
+      polyline = L.polyline(stitched, fbOpts).addTo(map);
     }
   }
   if (polyline) {

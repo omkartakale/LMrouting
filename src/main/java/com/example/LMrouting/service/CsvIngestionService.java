@@ -1,6 +1,7 @@
 package com.example.LMrouting.service;
 
 import com.example.LMrouting.dto.IngestionResult;
+import com.example.LMrouting.model.Priority;
 import com.example.LMrouting.model.Shipment;
 import com.example.LMrouting.store.InMemoryStore;
 import lombok.RequiredArgsConstructor;
@@ -104,6 +105,11 @@ public class CsvIngestionService {
         for (String s : new String[]{"srname","sr_id","srid","delivery_user_id","deliveryuserid",
                 "rider","rider_name","rider_id","delivery_boy","delivery_agent"})
             m.put(s, "sr_name");
+        // priority — P0/P1/P2 tier system. Accepted values: P0|P1|P2|0|1|2|HIGH|MEDIUM|LOW
+        // Default when column missing or value unrecognised: P2 (lowest priority).
+        for (String s : new String[]{"priority","priority_level","priority_tier","tier",
+                "shipment_priority","priority_class","priority_code"})
+            m.put(s, "priority");
         COLUMN_ALIASES = Collections.unmodifiableMap(m);
     }
 
@@ -499,6 +505,7 @@ public class CsvIngestionService {
                 .runNumber(parseInt(getOrDefault(cols, colIndex, "run_number", "0"), 0))
                 .rate(parseDouble(getOrDefault(cols, colIndex, "rate", "0"), 0.0))
                 .expectedPayout(parseDouble(getOrDefault(cols, colIndex, "expected_payout", "0"), 0.0))
+                .priority(Priority.parse(get(cols, colIndex, "priority")))
                 .outOfRange(outOfRange)
                 .distanceFromHubKm(distKm)
                 .build();
