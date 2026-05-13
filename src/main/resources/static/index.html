@@ -295,6 +295,18 @@ dialog::backdrop{background:rgba(15,23,42,.5);backdrop-filter:blur(2px)}
 .sr-shift-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
 #save-shift-durations-btn{display:none;margin-top:10px;width:100%;padding:9px 14px;font-size:.82rem;font-weight:600;border:none;border-radius:var(--radius-sm);cursor:pointer;background:var(--warning);color:#fff;transition:background .15s;letter-spacing:-.005em}
 #save-shift-durations-btn:hover{background:#d97706}
+/* ── Progressive sidebar tabs (Upload / Allocate / Monitor) ───────────────── */
+#sidebar-tabs{display:flex;gap:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px;box-shadow:var(--shadow-sm)}
+.sidebar-tab{flex:1;padding:9px 12px;font-size:.82rem;font-weight:600;color:var(--text-sub);background:transparent;border:none;border-radius:var(--radius-sm);cursor:pointer;transition:all .15s;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;letter-spacing:-.005em;position:relative}
+.sidebar-tab:hover:not(:disabled):not(.active){background:var(--bg-soft);color:var(--text)}
+.sidebar-tab.active{background:var(--primary);color:#fff;box-shadow:0 1px 3px rgba(37,99,235,.25)}
+.sidebar-tab:disabled{color:var(--text-mute);cursor:not-allowed;opacity:.55}
+.sidebar-tab .tab-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5}
+.sidebar-tab.active .tab-dot{background:#fff;opacity:1}
+.sidebar-tab.has-progress::after{content:'';position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 2px var(--bg-card)}
+.sidebar-tab.active.has-progress::after{box-shadow:0 0 0 2px var(--primary)}
+.tab-pane{display:none;flex-direction:column;gap:14px}
+.tab-pane.active{display:flex}
 /* Inputs (text/number) — uniform style across the app */
 input[type=text],input[type=number],input[type=search]{padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:.85rem;background:var(--bg-card);color:var(--text);font-family:inherit;transition:border-color .15s,box-shadow .15s}
 input[type=text]:focus,input[type=number]:focus,input[type=search]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
@@ -333,6 +345,35 @@ label{font-size:.8rem;color:var(--text);font-weight:500}
 <div id="main">
   <aside id="sidebar">
 
+    <!-- ── Progressive workflow tabs ────────────────────────────────────────
+         The tab strip below is purely a visual grouping. It does NOT alter any
+         existing panel IDs, class names, JS handlers, fetch calls, or backend
+         contracts. switchSidebarTab() (defined at the bottom of the JS block)
+         just toggles the .active class on a .tab-pane wrapper. Each pane
+         wraps the same panels that already existed — only their CSS visibility
+         is gated by the active tab. -->
+    <div id="sidebar-tabs" role="tablist">
+      <button type="button" class="sidebar-tab active" id="sb-tab-upload"
+              role="tab" aria-selected="true" onclick="switchSidebarTab('upload')">
+        <span class="tab-dot"></span> Upload
+      </button>
+      <button type="button" class="sidebar-tab" id="sb-tab-allocate"
+              role="tab" aria-selected="false" disabled
+              onclick="switchSidebarTab('allocate')"
+              title="Upload a shipment file first to unlock allocation">
+        <span class="tab-dot"></span> Allocate
+      </button>
+      <button type="button" class="sidebar-tab" id="sb-tab-monitor"
+              role="tab" aria-selected="false" disabled
+              onclick="switchSidebarTab('monitor')"
+              title="Run an allocation first to unlock monitoring">
+        <span class="tab-dot"></span> Monitor
+      </button>
+    </div>
+
+    <!-- ── Tab 1: Upload ──────────────────────────────────────────────── -->
+    <div class="tab-pane active" id="tab-pane-upload" role="tabpanel">
+
     <!-- Upload -->
     <div class="panel">
       <div class="panel-title">Upload Shipment File</div>
@@ -349,6 +390,11 @@ label{font-size:.8rem;color:var(--text);font-weight:500}
       <button id="upload-btn">Upload</button>
       <div id="upload-result"></div>
     </div>
+
+    </div><!-- /tab-pane-upload -->
+
+    <!-- ── Tab 2: Allocate ───────────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-pane-allocate" role="tabpanel">
 
     <!-- Allocation -->
     <div class="panel">
@@ -481,6 +527,11 @@ label{font-size:.8rem;color:var(--text);font-weight:500}
       </div>
     </div>
 
+    </div><!-- /tab-pane-allocate -->
+
+    <!-- ── Tab 3: Monitor ────────────────────────────────────────────── -->
+    <div class="tab-pane" id="tab-pane-monitor" role="tabpanel">
+
     <!-- Summary -->
     <div class="panel hidden" id="summary-panel">
       <div class="panel-title">Summary <span id="summary-mode-badge" style="font-size:.7rem;background:#e9ecef;color:#495057;border-radius:10px;padding:1px 7px;font-weight:600"></span></div>
@@ -576,6 +627,8 @@ label{font-size:.8rem;color:var(--text);font-weight:500}
       <!-- Results -->
       <div id="lm-results" style="margin-top:8px"></div>
     </div>
+
+    </div><!-- /tab-pane-monitor -->
 
   </aside>
 
@@ -4652,6 +4705,82 @@ window.addEventListener('load', function() {
     .then(function(dates) { if (dates.length) populateDateSelector(dates); })
     .catch(function() {});
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Progressive sidebar tabs — purely cosmetic / navigational
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The three tabs (Upload / Allocate / Monitor) gate visibility of existing
+// sidebar panels. NONE of the existing JS, fetch calls, IDs, classes, or
+// backend contracts are touched — switchSidebarTab() only toggles the .active
+// class on a .tab-pane wrapper and on the tab buttons.
+//
+// Auto-advance is wired by wrapping the global renderUploadResult() and
+// renderSummary() functions: the wrappers call the originals (unchanged) and
+// then unlock + switch the appropriate tab.
+
+/**
+ * Switch the visible sidebar tab.
+ * @param {'upload'|'allocate'|'monitor'} name
+ */
+window.switchSidebarTab = function(name) {
+  var tabs = ['upload', 'allocate', 'monitor'];
+  tabs.forEach(function(t) {
+    var btn  = document.getElementById('sb-tab-' + t);
+    var pane = document.getElementById('tab-pane-' + t);
+    if (!btn || !pane) return;
+    var active = (t === name);
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    pane.classList.toggle('active', active);
+  });
+};
+
+/** Enable a tab button (clears its disabled state and marks it as available). */
+window.unlockSidebarTab = function(name) {
+  var btn = document.getElementById('sb-tab-' + name);
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.add('has-progress');
+  btn.removeAttribute('title');
+};
+
+// Wrap renderUploadResult: on a successful upload, unlock Allocate and switch
+// to it. The original function runs first, completely unchanged.
+(function() {
+  if (typeof window.renderUploadResult !== 'function') return;
+  var _origRender = window.renderUploadResult;
+  window.renderUploadResult = function(data) {
+    var result = _origRender.apply(this, arguments);
+    try {
+      // Treat any result that produced a primaryDate or non-zero validCount
+      // as a successful upload.
+      var ok = data && (data.primaryDate || (data.validCount && data.validCount > 0));
+      if (ok) {
+        window.unlockSidebarTab('allocate');
+        window.switchSidebarTab('allocate');
+      }
+    } catch (e) { /* never break the underlying flow */ }
+    return result;
+  };
+})();
+
+// Wrap renderSummary: once any allocation summary renders, unlock Monitor and
+// switch to it so the user immediately sees the results.
+(function() {
+  if (typeof window.renderSummary !== 'function') return;
+  var _origSummary = window.renderSummary;
+  window.renderSummary = function(s) {
+    var result = _origSummary.apply(this, arguments);
+    try {
+      if (s && (s.totalShipments != null || s.srSummaries)) {
+        window.unlockSidebarTab('monitor');
+        window.switchSidebarTab('monitor');
+      }
+    } catch (e) { /* never break the underlying flow */ }
+    return result;
+  };
+})();
 </script>
 </body>
 </html>
