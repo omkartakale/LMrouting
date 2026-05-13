@@ -36,6 +36,18 @@ public class RouteOptimizerService {
     /**
      * Order shipments for one SR and assign route_sequence values (1-based).
      * Returns the ordered list with routeSequence set on each shipment.
+     *
+     * <p>Pipeline:
+     * <ol>
+     *   <li>Nearest-neighbour seed — fast, greedy, but can produce crossings.</li>
+     *   <li>2-opt polish (Haversine, no API calls) — eliminates segment crossings
+     *       that the greedy seed left behind. This is the step that gives
+     *       visually neat routes within each SR's territory.</li>
+     *   <li>Google Maps waypoint optimisation (if no ORS but Google is configured)
+     *       — used as an additional refinement step. Bypassed when ORS is
+     *       configured since ORS free tier has no waypoint-order endpoint
+     *       and the road polyline is fetched separately.</li>
+     * </ol>
      */
     public List<Shipment> optimizeRoute(String srName, List<Shipment> shipments) {
         if (shipments == null || shipments.isEmpty()) return new ArrayList<>();
@@ -44,23 +56,23 @@ public class RouteOptimizerService {
             return new ArrayList<>(shipments);
         }
 
-        // Always start with nearest-neighbor as baseline
+        // 1. Nearest-neighbour seed
         List<Shipment> ordered = nearestNeighborOrder(shipments);
 
-        // Try ORS first (free, real roads)
-        if (openRouteService.isConfigured()) {
-            try {
-                List<Shipment> orsOrdered = orsOptimize(srName, shipments, ordered);
-                if (orsOrdered != null) ordered = orsOrdered;
-            } catch (Exception e) {
-                log.warn("RouteOptimizerService: ORS fallback for SR '{}' — {}", srName, e.getMessage());
-            }
-        }
-        // Try Google Maps if ORS not configured
-        else if (googleMapsService.isApiKeyConfigured()) {
+        // 2. 2-opt polish — pure-Haversine, no API calls. Strongly reduces route
+        //    crossings and is the cheapest visual win for the count-based path.
+        ordered = twoOptPolish(ordered, TWO_OPT_MAX_ITERATIONS);
+
+        // 3. Optional Google Maps refinement (skipped when ORS is configured)
+        if (!openRouteService.isConfigured() && googleMapsService.isApiKeyConfigured()) {
             try {
                 List<Shipment> gmOrdered = googleMapsOptimize(srName, shipments, ordered);
-                if (gmOrdered != null) ordered = gmOrdered;
+                if (gmOrdered != null) {
+                    // Re-apply 2-opt after Google's reorder to clean up any
+                    // residual crossings (Google waypoint optimisation is also
+                    // a heuristic and can leave small crossings on >25 stops).
+                    ordered = twoOptPolish(gmOrdered, TWO_OPT_MAX_ITERATIONS);
+                }
             } catch (Exception e) {
                 log.warn("RouteOptimizerService: Google Maps fallback for SR '{}' — {}", srName, e.getMessage());
             }
@@ -71,6 +83,74 @@ public class RouteOptimizerService {
             ordered.get(i).setRouteSequence(i + 1);
         }
         return ordered;
+    }
+
+    // =========================================================================
+    // 2-opt polish — self-contained, Haversine-only, no API calls.
+    // =========================================================================
+
+    /** Hard cap on 2-opt passes so the worst case stays bounded for large routes. */
+    private static final int TWO_OPT_MAX_ITERATIONS = 30;
+
+    /**
+     * Iteratively reverse any segment whose removal shortens the route.
+     * Stops when a full pass finds no improvement, or {@code maxIterations} is
+     * reached. Runs in O(n²) per pass — for the typical SR route (~80 stops)
+     * this completes in well under 5 ms.
+     */
+    private List<Shipment> twoOptPolish(List<Shipment> route, int maxIterations) {
+        if (route == null || route.size() < 3) return route == null ? new ArrayList<>() : new ArrayList<>(route);
+
+        List<Shipment> cur = new ArrayList<>(route);
+        int n = cur.size();
+        int iter = 0;
+
+        while (iter < maxIterations) {
+            boolean improved = false;
+            for (int i = 0; i < n - 1; i++) {
+                for (int j = i + 1; j < n; j++) {
+                    if (twoOptGain(cur, i, j) > 1e-9) {
+                        // Reverse the sub-list [i..j] in place
+                        int a = i, b = j;
+                        while (a < b) {
+                            Shipment tmp = cur.get(a);
+                            cur.set(a, cur.get(b));
+                            cur.set(b, tmp);
+                            a++; b--;
+                        }
+                        improved = true;
+                    }
+                }
+            }
+            iter++;
+            if (!improved) break;
+        }
+        return cur;
+    }
+
+    /**
+     * Gain (in km) from reversing segment [i..j].
+     * Positive gain ⇒ the reversal shortens the route.
+     * For a route ... → A → [i..j] → B → ...
+     * Edges changed:
+     *   before: (A → i) + (j → B)
+     *   after : (A → j) + (i → B)
+     */
+    private double twoOptGain(List<Shipment> r, int i, int j) {
+        int n = r.size();
+        double prevLat = (i == 0) ? hubLat : r.get(i - 1).getDropLatitude();
+        double prevLng = (i == 0) ? hubLng : r.get(i - 1).getDropLongitude();
+        double nextLat = (j == n - 1) ? hubLat : r.get(j + 1).getDropLatitude();
+        double nextLng = (j == n - 1) ? hubLng : r.get(j + 1).getDropLongitude();
+
+        double iLat = r.get(i).getDropLatitude(), iLng = r.get(i).getDropLongitude();
+        double jLat = r.get(j).getDropLatitude(), jLng = r.get(j).getDropLongitude();
+
+        double current = GoogleMapsService.haversine(prevLat, prevLng, iLat, iLng)
+                       + GoogleMapsService.haversine(jLat, jLng, nextLat, nextLng);
+        double swapped = GoogleMapsService.haversine(prevLat, prevLng, jLat, jLng)
+                       + GoogleMapsService.haversine(iLat, iLng, nextLat, nextLng);
+        return current - swapped;
     }
 
     /**

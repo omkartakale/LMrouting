@@ -659,7 +659,10 @@ function showAllocError(msg) {
   var el = document.getElementById('alloc-error');
   el.textContent = msg;
   el.style.display = 'block';
-  setTimeout(function() { el.style.display = 'none'; }, 9000);
+  // Log to console so users can copy the full stack/cause from devtools.
+  try { console.error('Allocation error:', msg); } catch(e){}
+  // Keep error visible longer so users can read / screenshot it.
+  setTimeout(function() { el.style.display = 'none'; }, 20000);
 }
 
 function showAllocInfo(msg) {
@@ -1710,19 +1713,29 @@ var allocLoadingStages = [
 ];
 var allocLoadingTimer = null;
 
-function showAllocLoading(modeLabel) {
+/**
+ * Show the blocking allocation overlay.
+ * @param {string} modeLabel  - shown in the title (e.g. "OSM", "Reassigning", "Finalizing")
+ * @param {object} [opts]     - optional overrides:
+ *        { title, subtitle, stages: string[] }
+ */
+function showAllocLoading(modeLabel, opts) {
   var ov = document.getElementById('alloc-loading-overlay');
   if (!ov) return;
-  document.getElementById('alloc-loading-title').textContent = 'Running allocation (' + modeLabel + ')…';
-  document.getElementById('alloc-loading-sub').textContent =
+  opts = opts || {};
+  var title = opts.title || ('Running allocation (' + modeLabel + ')…');
+  var subtitle = opts.subtitle ||
     'Optimising routes and balancing earnings across SRs. This may take a few seconds for large datasets.';
+  document.getElementById('alloc-loading-title').textContent = title;
+  document.getElementById('alloc-loading-sub').textContent = subtitle;
+  var stages = (opts.stages && opts.stages.length) ? opts.stages : allocLoadingStages;
   var stageEl = document.getElementById('alloc-loading-stage');
   var i = 0;
-  stageEl.textContent = allocLoadingStages[0];
+  stageEl.textContent = stages[0];
   if (allocLoadingTimer) clearInterval(allocLoadingTimer);
   allocLoadingTimer = setInterval(function() {
-    i = (i + 1) % allocLoadingStages.length;
-    stageEl.textContent = allocLoadingStages[i];
+    i = (i + 1) % stages.length;
+    stageEl.textContent = stages[i];
   }, 1400);
   ov.classList.add('show');
 }
@@ -1763,12 +1776,14 @@ function runAllocation(mode) {
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     if (!res.ok) {
       hideAllocLoading();
-      // 9.9: mode-aware error message
-      if (getAllocationMode() === 'time-based') {
-        showAllocError('Allocation failed. Please check your affinity configuration. (' + res.status + ')');
-      } else {
-        showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
-      }
+      // Always surface the actual backend error so root cause is visible.
+      // If a meaningful message exists in the response body, use it directly;
+      // otherwise fall back to a mode-aware hint.
+      var detail = (res.data && (res.data.message || res.data.error || res.data.detail)) || '';
+      var fallback = (getAllocationMode() === 'time-based')
+        ? 'Allocation failed. Please check your affinity configuration.'
+        : 'Allocation failed.';
+      showAllocError((detail || fallback) + ' (HTTP ' + res.status + ')');
       return;
     }
     lastAllocationMode = mode;
@@ -1796,12 +1811,9 @@ function runAllocation(mode) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     hideAllocLoading();
-    // 9.9: mode-aware error message
-    if (getAllocationMode() === 'time-based') {
-      showAllocError('Allocation failed. Please check your affinity configuration.');
-    } else {
-      showAllocError('Network error: ' + e.message);
-    }
+    // Show the actual exception message — much more useful than a canned hint.
+    showAllocError('Allocation request failed: ' + (e && e.message ? e.message : e));
+    console.error('runAllocation error', e);
   });
 }
 
@@ -1824,26 +1836,44 @@ function renderSummary(s) {
     sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR');
 
   // ── Earnings fairness panel (CEO view) ─────────────────────────────────────
+  // SRs with zero earnings (no shipments assigned) are excluded from every
+  // fairness aggregate — they're idle, not "underperforming", and including
+  // them in the mean / lowest / range distorts the picture. A separate badge
+  // shows how many idle SRs were filtered out so the count isn't hidden.
   var earningsHtml = '';
-  if (s.srSummaries && s.srSummaries.length > 0 &&
-      s.srSummaries[0].netEarnings !== undefined && s.srSummaries[0].netEarnings !== 0) {
+  var nets = (s.srSummaries || [])
+      .filter(function(sr) {
+        return sr && sr.netEarnings !== undefined && sr.netEarnings !== null
+            && sr.netEarnings > 0;
+      })
+      .map(function(sr) { return { name: sr.srName, net: sr.netEarnings }; });
+  if (nets.length > 0) {
+    var idleSrCount = (s.srSummaries ? s.srSummaries.length : 0) - nets.length;
 
-    // Find highest, lowest, mean
-    var nets = s.srSummaries.map(function(sr) { return { name: sr.srName, net: sr.netEarnings || 0 }; });
     nets.sort(function(a, b) { return b.net - a.net; });
     var highest = nets[0];
     var lowest  = nets[nets.length - 1];
-    var mean    = s.meanNetEarnings !== undefined
-                    ? s.meanNetEarnings
-                    : nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
-    var range   = s.earningsRange !== undefined ? s.earningsRange : (highest.net - lowest.net);
+    // Mean is recomputed from the filtered list — even if the server sent a
+    // meanNetEarnings that included zeros, we override it here so the panel is
+    // consistent with what the user sees in the cards.
+    var mean    = nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
+    // Range is also recomputed from the filtered list (max − min of earning SRs).
+    var range   = highest.net - lowest.net;
 
-    // Calculate percentage of SRs within 10% of average
-    var threshold = mean * 0.10; // 10% of mean
-    var srsWithin10Percent = nets.filter(function(sr) {
+    // Percentage of *earning* SRs that fall within ±20% of the filtered mean.
+    // The 20% band is what the rebalancing-suggestion engine targets — every
+    // SR outside this band produces a recommended transfer below.
+    var FAIRNESS_BAND_PCT = 0.20;
+    var threshold = mean * FAIRNESS_BAND_PCT;
+    var srsWithinBand = nets.filter(function(sr) {
       return Math.abs(sr.net - mean) <= threshold;
     }).length;
-    var percentageWithin10 = (srsWithin10Percent / nets.length) * 100;
+    var percentageWithinBand = (srsWithinBand / nets.length) * 100;
+
+    var idleNote = idleSrCount > 0
+      ? ' &nbsp;|&nbsp; <span style="color:#757575">Excludes ' + idleSrCount +
+        ' idle SR' + (idleSrCount === 1 ? '' : 's') + ' (0 earnings)</span>'
+      : '';
 
     earningsHtml =
       '<div style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
@@ -1852,12 +1882,15 @@ function renderSummary(s) {
         earningsBox('&#x2B06; ' + esc(highest.name), '&#x20B9;' + highest.net.toFixed(2), 'Highest Earner', '#1b5e20', '#e8f5e9', '#a5d6a7') +
         earningsBox('&#x2B07; ' + esc(lowest.name),  '&#x20B9;' + lowest.net.toFixed(2),  'Lowest Earner',  '#b71c1c', '#ffebee', '#ef9a9a') +
         earningsBox('&#x2248; Mean', '&#x20B9;' + mean.toFixed(2), 'Avg Net Earnings', '#0d47a1', '#e3f2fd', '#90caf9') +
-        earningsBox('&#x1F4CA; ' + percentageWithin10.toFixed(1) + '%', srsWithin10Percent + ' of ' + nets.length + ' SRs', 'Within 10% of Avg', '#6a1b9a', '#f3e5f5', '#ce93d8') +
+        earningsBox('&#x1F4CA; ' + percentageWithinBand.toFixed(1) + '%', srsWithinBand + ' of ' + nets.length + ' SRs', 'Within 20% of Avg', '#6a1b9a', '#f3e5f5', '#ce93d8') +
       '</div>' +
       '<div style="margin-top:7px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 10px;font-size:.78rem">' +
         '<span style="font-weight:700;color:#e65100">Earnings Range: &#x20B9;' + range.toFixed(2) + '</span>' +
-        ' &nbsp;|&nbsp; Spread between highest and lowest earning SR' +
+        ' &nbsp;|&nbsp; Spread between highest and lowest earning SR' + idleNote +
       '</div>' +
+      // Suggestions block — recommends donor/receiver pairs and shipment
+      // counts that, if applied, would land every SR inside the ±20% band.
+      buildRebalancingSuggestionsHtml(s.srSummaries, mean, FAIRNESS_BAND_PCT) +
       '</div>';
   }
 
@@ -1929,6 +1962,129 @@ function earningsBox(title, value, label, textColor, bgColor, borderColor) {
     '<div class="val" style="color:' + textColor + ';font-size:1rem">' + value + '</div>' +
     '<div class="lbl">' + label + '</div>' +
     '</div>';
+}
+
+/**
+ * Build the "Suggested rebalancing" HTML block.
+ *
+ * Goal: emit a small set of actionable transfer suggestions that, if applied,
+ * would land every earning SR inside the ±bandPct band of the mean.
+ *
+ * Algorithm:
+ *   1. Filter out idle SRs (≤0 net earnings) — they're handled by attendance.
+ *   2. Compute each SR's deviation from the mean.
+ *   3. Pair the most over-earning donor with the most under-earning receiver,
+ *      transfer enough effective payout to bring both inside the band, repeat.
+ *   4. Convert the rupee delta to a shipment count using the donor's average
+ *      payout-per-shipment (a fair estimate of what a single transferred
+ *      shipment is worth in the rebalancer's eyes).
+ *   5. Cap at 8 suggestions to keep the panel scannable.
+ *
+ * This is a UI-side recommendation only — it does not actually move shipments.
+ * The user can apply the changes by using the Reassign button on individual
+ * stops, or by re-running allocation after adjusting SR attendance.
+ */
+function buildRebalancingSuggestionsHtml(srSummaries, mean, bandPct) {
+  if (!srSummaries || !srSummaries.length || !mean || mean <= 0) return '';
+
+  var lower = mean * (1 - bandPct);
+  var upper = mean * (1 + bandPct);
+
+  // Build a working copy of the earning SRs with mutable net values.
+  var working = srSummaries
+      .filter(function(sr) { return sr && sr.netEarnings > 0; })
+      .map(function(sr) {
+        var count = sr.shipmentCount || 0;
+        var avgPayout = count > 0 ? (sr.grossPayout || sr.netEarnings) / count : 0;
+        return {
+          name: sr.srName,
+          net: sr.netEarnings,
+          count: count,
+          // Avg effective payout per shipment — used to convert a rupee delta
+          // into a shipment count. Floor at ₹5 to avoid divide-by-zero noise.
+          avgPayout: Math.max(5, avgPayout)
+        };
+      });
+  if (working.length < 2) return '';
+
+  var suggestions = [];
+  var SUGGESTION_LIMIT = 8;
+
+  // Greedy pairing: each iteration matches the most-overloaded donor with the
+  // most-underloaded receiver, transfers just enough to bring at least one of
+  // them inside the band, and repeats until both ends are satisfied or we hit
+  // the suggestion cap.
+  while (suggestions.length < SUGGESTION_LIMIT) {
+    working.sort(function(a, b) { return b.net - a.net; });
+    var donor = working[0];
+    var receiver = working[working.length - 1];
+    if (!donor || !receiver || donor.name === receiver.name) break;
+
+    // If both are already inside the band, we're done.
+    if (donor.net <= upper && receiver.net >= lower) break;
+
+    // How much can/should we move? The transfer should not push the donor
+    // below the mean or the receiver above the mean — we just bring them
+    // each toward the centre.
+    var donorExcess = donor.net - mean;       // how much donor is above mean
+    var receiverDeficit = mean - receiver.net; // how much receiver is below mean
+    var deltaRupees = Math.max(0, Math.min(donorExcess, receiverDeficit));
+    if (deltaRupees < donor.avgPayout * 0.5) break; // less than half a shipment — stop
+
+    // Convert rupee delta to shipment count using donor's avg payout.
+    var shipments = Math.max(1, Math.round(deltaRupees / donor.avgPayout));
+    var moneyMoved = shipments * donor.avgPayout;
+
+    suggestions.push({
+      from: donor.name,
+      to: receiver.name,
+      shipments: shipments,
+      amount: moneyMoved,
+      fromNet: donor.net,
+      toNet: receiver.net
+    });
+
+    // Apply the simulated transfer to the working state and continue.
+    donor.net    -= moneyMoved;
+    receiver.net += moneyMoved;
+    donor.count    = Math.max(0, donor.count - shipments);
+    receiver.count = receiver.count + shipments;
+  }
+
+  if (suggestions.length === 0) {
+    return '<div class="rebalance-suggestions" style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+      '<div style="font-size:.78rem;font-weight:700;color:#1b5e20;margin-bottom:6px">' +
+        '&#x2705; Suggested Rebalancing' +
+      '</div>' +
+      '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:7px;padding:10px 12px;font-size:.78rem;color:#1b5e20">' +
+        'All earning SRs are already within &plusmn;' + Math.round(bandPct * 100) + '% of the mean. No transfers required.' +
+      '</div></div>';
+  }
+
+  var rows = suggestions.map(function(sg, i) {
+    return '<div class="rebal-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:.78rem">' +
+      '<div style="min-width:18px;height:18px;border-radius:9px;background:#1976d2;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center">' + (i + 1) + '</div>' +
+      '<div style="flex:1">' +
+        'Move <b>' + sg.shipments + '</b> shipment' + (sg.shipments === 1 ? '' : 's') +
+        ' from <b style="color:#b71c1c">' + esc(sg.from) + '</b>' +
+        ' &rarr; <b style="color:#1b5e20">' + esc(sg.to) + '</b>' +
+        ' <span style="color:#757575">(~&#x20B9;' + sg.amount.toFixed(0) + ')</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="rebalance-suggestions" style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+    '<div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:6px">' +
+      '&#x1F4A1; Suggested Rebalancing (target: all SRs within &plusmn;' + Math.round(bandPct * 100) + '% of mean)' +
+    '</div>' +
+    '<div style="background:#fff;border:1px solid #e9ecef;border-radius:7px;overflow:hidden">' +
+      rows +
+    '</div>' +
+    '<div style="margin-top:6px;font-size:.72rem;color:#757575;line-height:1.4">' +
+      'Estimates use each donor SR\'s average payout per shipment. Apply them via the Reassign button on individual stops, ' +
+      'or adjust SR attendance and re-run allocation.' +
+    '</div>' +
+  '</div>';
 }
 
 // ── SR LIST ───────────────────────────────────────────────────────────────────
@@ -2602,6 +2758,11 @@ function confirmOverride() {
   if (!selected) { alert('Please select a target SR.'); return; }
   var date = document.getElementById('date-select').value;
   document.getElementById('override-modal').close();
+  showAllocLoading('Reassign', {
+    title: 'Reassigning shipment…',
+    subtitle: 'Moving the shipment to the selected SR and re-sequencing the route.',
+    stages: ['Updating assignment', 'Re-sequencing route', 'Recomputing earnings', 'Refreshing summary']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/override', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2609,25 +2770,35 @@ function confirmOverride() {
   })
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
   .then(function(res) {
-    if (!res.ok) { showAllocError(res.data.message || 'Override failed'); return; }
-    refreshAllocation();
+    if (!res.ok) { hideAllocLoading(); showAllocError(res.data.message || 'Override failed'); return; }
+    refreshAllocation(true /* keepLoader */);
   })
-  .catch(function(e) { showAllocError('Override error: ' + e.message); });
+  .catch(function(e) { hideAllocLoading(); showAllocError('Override error: ' + e.message); });
 }
 
 function undoOverride() {
   var date = document.getElementById('date-select').value;
+  showAllocLoading('Undo', {
+    title: 'Undoing last override…',
+    subtitle: 'Reverting the most recent reassignment.',
+    stages: ['Reverting assignment', 'Re-sequencing route', 'Refreshing summary']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/override', { method: 'DELETE' })
     .then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Undo failed'); });
-      refreshAllocation();
+      refreshAllocation(true /* keepLoader */);
     })
-    .catch(function(e) { showAllocError('Undo error: ' + e.message); });
+    .catch(function(e) { hideAllocLoading(); showAllocError('Undo error: ' + e.message); });
 }
 
 function finalizeAllocation() {
   if (!confirm('Finalize allocation? No further overrides will be allowed.')) return;
   var date = document.getElementById('date-select').value;
+  showAllocLoading('Finalize', {
+    title: 'Finalizing allocation…',
+    subtitle: 'Locking the allocation. No further overrides will be accepted.',
+    stages: ['Validating allocation', 'Persisting final state', 'Locking overrides']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/finalize', { method: 'POST' })
     .then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Finalize failed'); });
@@ -2636,13 +2807,26 @@ function finalizeAllocation() {
       document.getElementById('undo-btn').disabled = true;
       document.getElementById('finalize-btn').disabled = true;
       document.querySelectorAll('#attendance-list input').forEach(function(el) { el.disabled = true; });
-      refreshAllocation();
+      refreshAllocation(true /* keepLoader */);
     })
-    .catch(function(e) { showAllocError('Finalize error: ' + e.message); });
+    .catch(function(e) { hideAllocLoading(); showAllocError('Finalize error: ' + e.message); });
 }
 
-function refreshAllocation() {
+/**
+ * Reload the current allocation from the server.
+ * @param {boolean} keepLoader  if true, the caller already showed the loader
+ *                              and this function will hide it after redraw.
+ */
+function refreshAllocation(keepLoader) {
   var date = document.getElementById('date-select').value;
+  var ownsLoader = !keepLoader;
+  if (ownsLoader) {
+    showAllocLoading('Refresh', {
+      title: 'Refreshing allocation…',
+      subtitle: 'Reloading the latest allocation snapshot.',
+      stages: ['Fetching summary', 'Rebuilding SR list', 'Redrawing routes']
+    });
+  }
   fetch('/api/allocate/' + encodeURIComponent(date) + '/summary')
     .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(summary) {
@@ -2650,13 +2834,20 @@ function refreshAllocation() {
       renderSummary(summary);
       renderSrList(summary.srSummaries);
       lmShowPanel(summary.srSummaries);
-      if (lastAllocationMode) renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode);
+      if (lastAllocationMode) {
+        renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode, function() { hideAllocLoading(); });
+      } else {
+        hideAllocLoading();
+      }
       if (currentSrName) {
         var idx = summary.srSummaries.findIndex(function(s) { return s.srName === currentSrName; });
         if (idx >= 0) selectSr(currentSrName, idx);
       }
     })
-    .catch(function(e) { console.warn('Refresh error', e); });
+    .catch(function(e) {
+      hideAllocLoading();
+      console.warn('Refresh error', e);
+    });
 }
 
 // ── UTILITIES ─────────────────────────────────────────────────────────────────
@@ -3851,6 +4042,17 @@ function runAffinityAllocation() {
     }
   }
 
+  showAllocLoading('Custom Zones', {
+    title: 'Running zone-based allocation…',
+    subtitle: 'Saving regions and allocating shipments using the drawn zones.',
+    stages: [
+      'Saving custom regions',
+      'Matching shipments to regions',
+      'Assigning SRs to regions',
+      'Sequencing routes per SR',
+      'Computing fairness metrics'
+    ]
+  });
   fetch('/api/affinity-match/set-custom-regions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3858,7 +4060,7 @@ function runAffinityAllocation() {
   })
   .then(function(r) { return r.json(); })
   .then(function(setResult) {
-    if (setResult.error) { showAllocError(setResult.error); return; }
+    if (setResult.error) { hideAllocLoading(); showAllocError(setResult.error); return; }
     // 9.3: include allocationMode in the request body
     var allocMode = getAllocationMode();
     var allocBody = { date: date, allocationMode: allocMode };
@@ -3872,6 +4074,7 @@ function runAffinityAllocation() {
   .then(function(data) {
     if (!data) return;
     if (data.error) {
+      hideAllocLoading();
       // 9.9: error message in time-based mode should not reference count-based fields
       if (getAllocationMode() === 'time-based') {
         showAllocError('Allocation failed. Please check your affinity configuration.');
@@ -3881,8 +4084,10 @@ function runAffinityAllocation() {
       return;
     }
     _handleAffinityResult(data, date);
+    hideAllocLoading();
   })
   .catch(function(e) {
+    hideAllocLoading();
     // 9.9: mode-aware error message
     if (getAllocationMode() === 'time-based') {
       showAllocError('Allocation failed. Please check your affinity configuration.');
@@ -3943,11 +4148,26 @@ function loadPreviousAllocation() {
   var affinityModeBtn = document.getElementById('mode-affinity-btn');
   if (affinityModeBtn) { affinityModeBtn.style.background = '#e9ecef'; affinityModeBtn.style.color = '#495057'; }
 
+  showAllocLoading('Previous', {
+    title: 'Loading previous allocation…',
+    subtitle: 'Restoring the original allocation snapshot for ' + date + '.',
+    stages: [
+      'Fetching previous summary',
+      'Rebuilding per-SR earnings',
+      'Restoring routes on the map'
+    ]
+  });
+
   fetch('/api/previous/' + encodeURIComponent(date) + '/summary')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       btn.innerHTML = '📊 Previous';
-      if (data.error) { showAllocError(data.error); btn.style.background = '#e9ecef'; btn.style.color = '#495057'; return; }
+      if (data.error) {
+        hideAllocLoading();
+        showAllocError(data.error);
+        btn.style.background = '#e9ecef'; btn.style.color = '#495057';
+        return;
+      }
 
       clearAllocationUI();
 
@@ -3987,13 +4207,21 @@ function loadPreviousAllocation() {
         });
         list.innerHTML = h;
 
-        // Render markers on map
-        renderPreviousOnMap(data.srSummaries, date);
+        // Markers are rendered below (after this block) via renderPreviousOnMap
+        // so the loading overlay can wait until polylines have been drawn.
       }
 
       showAllocInfo('Previous allocation loaded: ' + data.totalSrs + ' SRs, ' + data.allocatedShipments + ' shipments. Earnings range: ₹' + (data.earningsRange || 0).toFixed(0));
+      // Hand the loader off to renderPreviousOnMap — it will dismiss once
+      // every per-SR polyline has been fetched and drawn.
+      if (data.srSummaries && data.srSummaries.length) {
+        renderPreviousOnMap(data.srSummaries, date, function() { hideAllocLoading(); });
+      } else {
+        hideAllocLoading();
+      }
     })
     .catch(function(e) {
+      hideAllocLoading();
       btn.innerHTML = '📊 Previous';
       btn.style.background = '#e9ecef';
       btn.style.color = '#495057';
@@ -4001,12 +4229,15 @@ function loadPreviousAllocation() {
     });
 }
 
-function renderPreviousOnMap(srSummaries, date) {
+function renderPreviousOnMap(srSummaries, date, onComplete) {
   clearMarkers();
   var i = 0;
   function next() {
     if (i >= srSummaries.length) {
       if (activeMapProvider === 'google') syncToGoogleMap();
+      if (typeof onComplete === 'function') {
+        try { onComplete(); } catch (e) { /* ignore */ }
+      }
       return;
     }
     var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
