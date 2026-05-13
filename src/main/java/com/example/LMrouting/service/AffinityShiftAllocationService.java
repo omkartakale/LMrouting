@@ -219,13 +219,54 @@ public class AffinityShiftAllocationService {
 
                     for (Shipment s : territoryResult.overflow()) {
                         boolean placed = false;
-                        List<String> srsByLoad = regionSrNames.stream()
+
+                        // STRICT TERRITORY CHECK: Is this shipment inside an SR's convex hull?
+                        String ownerSr = null;
+                        for (String sr : regionSrNames) {
+                            List<double[]> hull = allTerritoryBoundaries.get(sr);
+                            if (hull != null && hull.size() >= 3
+                                    && isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), hull)) {
+                                ownerSr = sr;
+                                break;
+                            }
+                        }
+
+                        if (ownerSr != null) {
+                            List<Shipment> current = srAssignments.get(ownerSr);
+                            if (current != null) {
+                                List<Shipment> trial = new ArrayList<>(current);
+                                trial.add(s);
+                                ShiftWorkloadCalculatorService.WorkloadResult w =
+                                        workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
+                                if (w.totalMinutes() < getShiftDurationForSr(ownerSr, srShiftDurations) * overfillTolerance) {
+                                    current.add(s);
+                                    consolidated.add(s);
+                                    placed = true;
+                                }
+                            }
+                            if (!placed) unconsolidated.add(s);
+                            continue;
+                        }
+
+                        // Not inside any territory — only assign to nearest SR within 1.5km
+                        final double MAX_PROXIMITY_KM = 1.5;
+                        final Shipment overflowShipment = s;
+                        List<String> srsByProximity = regionSrNames.stream()
                                 .filter(sr -> srAssignments.get(sr) != null && !srAssignments.get(sr).isEmpty())
-                                .sorted(Comparator.comparingInt(
-                                        (String sr) -> srAssignments.get(sr).size()).reversed())
+                                .sorted(Comparator.comparingDouble((String sr) -> {
+                                    List<Shipment> srShips = srAssignments.get(sr);
+                                    double avgLat = srShips.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                                    double avgLng = srShips.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                                    return haversine(overflowShipment.getDropLatitude(), overflowShipment.getDropLongitude(), avgLat, avgLng);
+                                }))
                                 .collect(Collectors.toList());
 
-                        for (String sr : srsByLoad) {
+                        for (String sr : srsByProximity) {
+                            List<Shipment> srShips = srAssignments.get(sr);
+                            double avgLat = srShips.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                            double avgLng = srShips.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                            if (haversine(s.getDropLatitude(), s.getDropLongitude(), avgLat, avgLng) > MAX_PROXIMITY_KM) break;
+
                             List<Shipment> current = srAssignments.get(sr);
                             List<Shipment> trial = new ArrayList<>(current);
                             trial.add(s);
@@ -275,7 +316,10 @@ public class AffinityShiftAllocationService {
         // If no NON_AFFINITY SRs exist, no-region shipments remain unallocated.
 
         // 6a: Re-assign overflow shipments back to their own region's SRs
-        //     (strict shift duration cap — no overfill allowed)
+        //     STRICT TERRITORY RULE: A shipment is ONLY assigned to an SR if:
+        //     1. It does NOT fall inside any other SR's convex hull territory
+        //     2. It is within 1.5km of the target SR's centroid
+        //     If neither condition is met → mark as unallocated (no cross-territory assignment)
         double overfillTolerance = 1.0;
         List<Shipment> trulyUnallocated = new ArrayList<>();
 
@@ -288,18 +332,63 @@ public class AffinityShiftAllocationService {
                 continue;
             }
 
-            // Try to assign to an SR in the same region (prefer SR with most shipments
-            // to maximize utilisation of already-active SRs)
             List<String> regionSrs = getAssignedSrsForRegion(shipmentRegion, config, presentSrs);
-            // Sort by current load descending (fill busiest SR first — minimum manpower)
+
+            // STRICT CHECK 1: Is this shipment inside another SR's convex hull?
+            // If yes → unallocated immediately, no cross-territory assignment allowed
+            String ownerSr = null;
+            for (String sr : regionSrs) {
+                List<double[]> hull = allTerritoryBoundaries.get(sr);
+                if (hull != null && hull.size() >= 3
+                        && isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), hull)) {
+                    ownerSr = sr;
+                    break;
+                }
+            }
+
+            if (ownerSr != null) {
+                // Shipment is inside ownerSr's territory — only assign to ownerSr
+                List<Shipment> current = srAssignments.get(ownerSr);
+                if (current != null) {
+                    List<Shipment> trial = new ArrayList<>(current);
+                    trial.add(s);
+                    ShiftWorkloadCalculatorService.WorkloadResult w =
+                            workloadCalculator.computeWorkload(nearestNeighbourOrder(trial));
+                    if (w.totalMinutes() < getShiftDurationForSr(ownerSr, srShiftDurations) * overfillTolerance) {
+                        current.add(s);
+                        continue; // placed in its rightful owner
+                    }
+                }
+                // Owner SR is full → unallocated (strict: don't assign to another SR)
+                trulyUnallocated.add(s);
+                continue;
+            }
+
+            // STRICT CHECK 2: Shipment is not inside any territory polygon.
+            // Only assign to the nearest SR if within 1.5km proximity threshold.
+            final double MAX_PROXIMITY_KM = 1.5;
+            final Shipment shipment = s;
             regionSrs = regionSrs.stream()
-                    .sorted(Comparator.comparingInt(
-                            (String sr) -> srAssignments.getOrDefault(sr, Collections.emptyList()).size())
-                            .reversed())
+                    .filter(sr -> srAssignments.get(sr) != null && !srAssignments.get(sr).isEmpty())
+                    .sorted(Comparator.comparingDouble((String sr) -> {
+                        List<Shipment> srShips = srAssignments.get(sr);
+                        double avgLat = srShips.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                        double avgLng = srShips.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                        return haversine(shipment.getDropLatitude(), shipment.getDropLongitude(), avgLat, avgLng);
+                    }))
                     .collect(Collectors.toList());
 
             boolean placed = false;
             for (String sr : regionSrs) {
+                List<Shipment> srShips = srAssignments.get(sr);
+                if (srShips == null) continue;
+                double avgLat = srShips.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                double avgLng = srShips.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                double distToSr = haversine(s.getDropLatitude(), s.getDropLongitude(), avgLat, avgLng);
+
+                // Only assign if within proximity threshold
+                if (distToSr > MAX_PROXIMITY_KM) break; // sorted by distance, so no point checking further
+
                 List<Shipment> current = srAssignments.get(sr);
                 if (current == null) continue;
                 List<Shipment> trial = new ArrayList<>(current);
@@ -490,19 +579,67 @@ public class AffinityShiftAllocationService {
                         ? getAssignedSrsForRegion(shipmentRegion, config, presentSrs)
                         : new ArrayList<>(orderedAssignments.keySet());
 
-                // Sort by current workload ascending (prefer least-loaded SR)
-                candidateSrs.sort(Comparator.comparingDouble(sr -> {
-                    ShiftWorkloadCalculatorService.WorkloadResult wl = workloadBySr.get(sr);
-                    return wl != null ? wl.totalMinutes() : Double.MAX_VALUE;
+                // STRICT TERRITORY CHECK: Is this shipment inside another SR's convex hull?
+                // If yes → only try that SR. If it can't absorb → unallocated.
+                String ownerSr = null;
+                for (String sr : candidateSrs) {
+                    List<double[]> hull = allTerritoryBoundaries.get(sr);
+                    if (hull != null && hull.size() >= 3
+                            && isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), hull)) {
+                        ownerSr = sr;
+                        break;
+                    }
+                }
+
+                if (ownerSr != null) {
+                    // Only try the territory owner
+                    List<Shipment> route = orderedAssignments.get(ownerSr);
+                    if (route != null) {
+                        List<Shipment> trial = new ArrayList<>(route);
+                        trial.add(s);
+                        List<Shipment> optimizedTrial = trial.size() > 2
+                                ? shedRouteStrategy.optimize(trial, hubLat, hubLng)
+                                : trial;
+                        ShiftWorkloadCalculatorService.WorkloadResult trialW =
+                                workloadCalculator.computeWorkload(optimizedTrial);
+                        if (trialW.totalMinutes() < getShiftDurationForSr(ownerSr, srShiftDurations)) {
+                            for (int i = 0; i < optimizedTrial.size(); i++) {
+                                optimizedTrial.get(i).setRouteSequence(i + 1);
+                            }
+                            orderedAssignments.put(ownerSr, optimizedTrial);
+                            workloadBySr.put(ownerSr, trialW);
+                            placed = true;
+                        }
+                    }
+                    if (!placed) unplacedShed.add(s);
+                    continue;
+                }
+
+                // Shipment not inside any territory polygon.
+                // Only assign to nearest SR within 1.5km proximity threshold.
+                final double MAX_PROXIMITY_KM = 1.5;
+                final Shipment shedShipment = s;
+                candidateSrs.sort(Comparator.comparingDouble((String sr) -> {
+                    List<Shipment> srRoute = orderedAssignments.get(sr);
+                    if (srRoute == null || srRoute.isEmpty()) return Double.MAX_VALUE;
+                    double avgLat = srRoute.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                    double avgLng = srRoute.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                    return haversine(shedShipment.getDropLatitude(), shedShipment.getDropLongitude(), avgLat, avgLng);
                 }));
 
                 for (String sr : candidateSrs) {
+                    List<Shipment> srRoute = orderedAssignments.get(sr);
+                    if (srRoute == null || srRoute.isEmpty()) continue;
+                    double avgLat = srRoute.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                    double avgLng = srRoute.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                    double distToSr = haversine(s.getDropLatitude(), s.getDropLongitude(), avgLat, avgLng);
+                    if (distToSr > MAX_PROXIMITY_KM) break; // sorted by distance
+
                     List<Shipment> route = orderedAssignments.get(sr);
                     if (route == null) continue;
 
                     List<Shipment> trial = new ArrayList<>(route);
                     trial.add(s);
-                    // Re-optimize the trial route
                     List<Shipment> optimizedTrial = trial.size() > 2
                             ? shedRouteStrategy.optimize(trial, hubLat, hubLng)
                             : trial;
@@ -510,7 +647,6 @@ public class AffinityShiftAllocationService {
                             workloadCalculator.computeWorkload(optimizedTrial);
 
                     if (trialW.totalMinutes() < getShiftDurationForSr(sr, srShiftDurations)) {
-                        // Fits — update the route
                         for (int i = 0; i < optimizedTrial.size(); i++) {
                             optimizedTrial.get(i).setRouteSequence(i + 1);
                         }
@@ -554,13 +690,19 @@ public class AffinityShiftAllocationService {
 
             // Try to distribute these shipments individually across other SRs in the region
             List<String> regionSrs = getAssignedSrsForRegion(srRegion, config, presentSrs);
+            // Compute centroid of the SR being consolidated
+            double consolidateLat = route.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+            double consolidateLng = route.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+
             List<String> candidateSrs = regionSrs.stream()
                     .filter(candidate -> !candidate.equals(sr))
                     .filter(candidate -> orderedAssignments.get(candidate) != null
                             && orderedAssignments.get(candidate).size() >= leftoverMinThreshold)
-                    .sorted(Comparator.comparingDouble(candidate -> {
-                        ShiftWorkloadCalculatorService.WorkloadResult wl = workloadBySr.get(candidate);
-                        return wl != null ? wl.totalMinutes() : Double.MAX_VALUE;
+                    .sorted(Comparator.comparingDouble((String candidate) -> {
+                        List<Shipment> candidateRoute = orderedAssignments.get(candidate);
+                        double avgLat = candidateRoute.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                        double avgLng = candidateRoute.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                        return haversine(consolidateLat, consolidateLng, avgLat, avgLng);
                     }))
                     .collect(Collectors.toList());
 
@@ -570,7 +712,57 @@ public class AffinityShiftAllocationService {
 
             for (Shipment s : route) {
                 boolean wasPlaced = false;
+
+                // STRICT TERRITORY CHECK: Is this shipment inside another SR's convex hull?
+                String ownerSr = null;
                 for (String candidate : candidateSrs) {
+                    List<double[]> hull = allTerritoryBoundaries.get(candidate);
+                    if (hull != null && hull.size() >= 3
+                            && isPointInPolygon(s.getDropLatitude(), s.getDropLongitude(), hull)) {
+                        ownerSr = candidate;
+                        break;
+                    }
+                }
+
+                if (ownerSr != null) {
+                    // Only try the territory owner
+                    List<Shipment> candidateRoute = orderedAssignments.get(ownerSr);
+                    if (candidateRoute != null) {
+                        List<Shipment> trial = new ArrayList<>(candidateRoute);
+                        trial.add(s);
+                        List<Shipment> optimizedTrial = trial.size() > 2
+                                ? consolidateStrategy.optimize(trial, hubLat, hubLng)
+                                : trial;
+                        ShiftWorkloadCalculatorService.WorkloadResult w =
+                                workloadCalculator.computeWorkload(optimizedTrial);
+                        if (w.totalMinutes() < getShiftDurationForSr(ownerSr, srShiftDurations)) {
+                            for (int i = 0; i < optimizedTrial.size(); i++) {
+                                optimizedTrial.get(i).setRouteSequence(i + 1);
+                            }
+                            orderedAssignments.put(ownerSr, optimizedTrial);
+                            workloadBySr.put(ownerSr, w);
+                            placed.add(s);
+                            wasPlaced = true;
+                        }
+                    }
+                    if (!wasPlaced) unplaced.add(s);
+                    continue;
+                }
+
+                // Not inside any territory — only assign to nearest SR within 1.5km
+                final double MAX_PROXIMITY_KM = 1.5;
+                final Shipment consolidateShipment = s;
+                List<String> proximityCandidates = candidateSrs.stream()
+                        .filter(candidate -> {
+                            List<Shipment> cr = orderedAssignments.get(candidate);
+                            if (cr == null || cr.isEmpty()) return false;
+                            double avgLat = cr.stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+                            double avgLng = cr.stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+                            return haversine(consolidateShipment.getDropLatitude(), consolidateShipment.getDropLongitude(), avgLat, avgLng) <= MAX_PROXIMITY_KM;
+                        })
+                        .collect(Collectors.toList());
+
+                for (String candidate : proximityCandidates) {
                     List<Shipment> candidateRoute = orderedAssignments.get(candidate);
                     List<Shipment> trial = new ArrayList<>(candidateRoute);
                     trial.add(s);
