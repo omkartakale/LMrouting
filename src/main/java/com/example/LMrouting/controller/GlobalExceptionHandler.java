@@ -4,6 +4,7 @@ import com.example.LMrouting.exception.AllocationAlreadyFinalizedException;
 import com.example.LMrouting.exception.AllocationNotFoundException;
 import com.example.LMrouting.exception.NoPresentSrsException;
 import com.example.LMrouting.exception.SrNotPresentException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -24,6 +25,7 @@ import java.util.Map;
  * </ul>
  */
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(AllocationNotFoundException.class)
@@ -48,6 +50,32 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleAllocationAlreadyFinalized(
             AllocationAlreadyFinalizedException ex) {
         return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * Bad-request bucket: any IllegalArgumentException / IllegalStateException
+     * thrown from validation paths should reach the client with its message,
+     * not Spring's default empty 500.
+     */
+    @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
+    public ResponseEntity<Map<String, Object>> handleBadRequest(RuntimeException ex) {
+        log.warn("Bad request: {}", ex.getMessage());
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /**
+     * Catch-all: ensures unhandled RuntimeExceptions (NPE, NoSuchElement, etc.)
+     * still return a usable message to the UI rather than an empty 500 body.
+     * The full stack trace is logged server-side for debugging.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
+        log.error("Unhandled exception in API:", ex);
+        String msg = ex.getMessage();
+        if (msg == null || msg.isBlank()) {
+            msg = ex.getClass().getSimpleName() + " (see server logs)";
+        }
+        return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, msg);
     }
 
     private ResponseEntity<Map<String, Object>> buildResponse(HttpStatus status, String message) {

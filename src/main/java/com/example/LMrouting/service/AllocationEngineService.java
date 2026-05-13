@@ -552,7 +552,13 @@ public class AllocationEngineService {
 
         int targetSize = n / k;
         int maxSize    = (int) (targetSize * 1.2) + 1;
+        // Hard floor: every cluster must end up with at least 50% of target,
+        // so no SR is left with zero (or near-zero) shipments. This protects
+        // against the K-Means starvation case where two seed centroids land
+        // in dead zones and never attract any points.
+        int minSize    = Math.max(1, targetSize / 2);
 
+        // Downsize-only pass — sheds points from clusters > maxSize.
         for (int pass = 0; pass < 20; pass++) {
             boolean moved = false;
             for (int c = 0; c < k; c++) {
@@ -579,7 +585,57 @@ public class AllocationEngineService {
                         clusters.get(c).remove(Integer.valueOf(bestIdx));
                         clusters.get(smallest).add(bestIdx);
                         labels[bestIdx] = smallest;
+                        // Refresh receiving cluster's centroid so subsequent
+                        // boundary picks reflect its current shape.
+                        centroids[smallest] = computeCentroid(clusters.get(smallest), forward);
                         moved = true;
+                    }
+                }
+            }
+            if (!moved) break;
+        }
+
+        // Upsize pass — guarantees every cluster has at least minSize. Without
+        // this, a cluster that the K-Means iterations starved (size 0) stays
+        // at 0 forever because the downsize-only pass only fires when some
+        // cluster exceeds maxSize. We pull from the *largest* cluster (only if
+        // it still has more than minSize to give) so we never re-starve a
+        // donor. The chosen point is the one closest to the recipient's
+        // centroid — same "boundary point" rule as the downsize pass.
+        for (int pass = 0; pass < 20; pass++) {
+            boolean moved = false;
+            for (int c = 0; c < k; c++) {
+                while (clusters.get(c).size() < minSize) {
+                    // Refresh recipient centroid (it may currently sit on stale
+                    // seed coordinates if the cluster started empty).
+                    if (!clusters.get(c).isEmpty()) {
+                        centroids[c] = computeCentroid(clusters.get(c), forward);
+                    }
+                    int largest = -1, largestSz = -1;
+                    for (int j = 0; j < k; j++) {
+                        if (j != c && clusters.get(j).size() > largestSz) {
+                            largestSz = clusters.get(j).size(); largest = j;
+                        }
+                    }
+                    // Stop if even the largest donor is at/under minSize —
+                    // any further transfer would re-starve someone.
+                    if (largest < 0 || largestSz <= minSize) break;
+
+                    double bestD = Double.MAX_VALUE;
+                    int bestIdx = -1;
+                    for (int idx : clusters.get(largest)) {
+                        Shipment s = forward.get(idx);
+                        double d = haversine(s.getDropLatitude(), s.getDropLongitude(),
+                                centroids[c][0], centroids[c][1]);
+                        if (d < bestD) { bestD = d; bestIdx = idx; }
+                    }
+                    if (bestIdx >= 0) {
+                        clusters.get(largest).remove(Integer.valueOf(bestIdx));
+                        clusters.get(c).add(bestIdx);
+                        labels[bestIdx] = c;
+                        moved = true;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -592,8 +648,28 @@ public class AllocationEngineService {
             for (int idx : clusters.get(c)) assignment.get(sr).add(forward.get(idx));
         }
 
-        log.info("Phase 1 (K-Means): {} shipments → {} clusters", n, k);
+        // Per-cluster summary for the operator: shows the distribution range
+        // and flags any cluster outside [minSize..maxSize] (none expected).
+        int actualMin = Integer.MAX_VALUE, actualMax = 0;
+        for (List<Integer> cl : clusters) {
+            actualMin = Math.min(actualMin, cl.size());
+            actualMax = Math.max(actualMax, cl.size());
+        }
+        log.info("Phase 1 (K-Means): {} shipments → {} clusters " +
+                "(target={}, min={}, max={}, actual range=[{}..{}])",
+                n, k, targetSize, minSize, maxSize, actualMin, actualMax);
         return assignment;
+    }
+
+    /** Helper used by the size-balancing passes to refresh a cluster centroid. */
+    private double[] computeCentroid(List<Integer> indices, List<Shipment> forward) {
+        if (indices == null || indices.isEmpty()) return new double[]{hubLat, hubLng};
+        double sumLat = 0, sumLng = 0;
+        for (int idx : indices) {
+            sumLat += forward.get(idx).getDropLatitude();
+            sumLng += forward.get(idx).getDropLongitude();
+        }
+        return new double[]{sumLat / indices.size(), sumLng / indices.size()};
     }
 
     // =========================================================================
@@ -687,6 +763,14 @@ public class AllocationEngineService {
      */
     private static final int BOUNDARY_CANDIDATE_LIMIT = 15;
 
+    /**
+     * Maximum allowed distance (km) between a transfer candidate and the
+     * receiving SR's centroid. This is the geographic-integrity guard for the
+     * fairness rebalancer: even the most beneficial earnings transfer is
+     * rejected if the shipment is too far from the poor SR's territory.
+     */
+    private static final double REBALANCE_TRANSFER_MAX_DISTANCE_KM = 5.0;
+
     private Shipment findBestTransfer(String richSr, String poorSr,
                                       Map<String, List<Shipment>> assignment,
                                       Map<String, Double> distances,
@@ -700,9 +784,23 @@ public class AllocationEngineService {
 
         double[] poorCentroid = centroid(assignment.get(poorSr));
 
+        // If the receiving SR is empty or severely under-loaded, its centroid
+        // is meaningless (it's the hub fallback) — the distance cap must be
+        // bypassed for those cases or the SR will starve forever.
+        int poorSize = assignment.get(poorSr).size();
+        boolean bypassDistanceCap = poorSize < 5;
+
         // Sort by distance to poorSr centroid — boundary candidates first.
         // thenComparing(shippingId) is a stable tiebreaker for equidistant shipments.
+        // Distance filter: only consider candidates within
+        // REBALANCE_TRANSFER_MAX_DISTANCE_KM of the receiving SR's centroid,
+        // EXCEPT when the receiving SR is starved (poorSize < 5) — those
+        // transfers must be allowed regardless of distance to fill the gap.
         List<Shipment> candidates = richShipments.stream()
+                .filter(s -> bypassDistanceCap
+                        || haversine(s.getDropLatitude(), s.getDropLongitude(),
+                                poorCentroid[0], poorCentroid[1])
+                                <= REBALANCE_TRANSFER_MAX_DISTANCE_KM)
                 .sorted(Comparator.comparingDouble((Shipment s) ->
                         haversine(s.getDropLatitude(), s.getDropLongitude(),
                                 poorCentroid[0], poorCentroid[1]))
@@ -759,29 +857,39 @@ public class AllocationEngineService {
                 .sorted(Comparator.comparing(Shipment::getShippingId))
                 .collect(Collectors.toList());
 
+        // Pre-compute every SR's centroid once per call. Reverse shipments are
+        // always routed to the *territorially nearest* SR — picking by "close
+        // to any Forward shipment" alone was producing assignments where a
+        // Reverse drop sat at the very edge of an SR's cluster, dragging the
+        // route across other SRs' territories.
+        Map<String, double[]> centroids = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Shipment>> e : assignment.entrySet()) {
+            centroids.put(e.getKey(), centroid(e.getValue()));
+        }
+
         for (Shipment rev : sortedReverse) {
             double rLat = rev.getDropLatitude(), rLng = rev.getDropLongitude();
 
-            // Collect SRs that have a Forward shipment within 1 km
-            Set<String> qualifying = new LinkedHashSet<>();
-            for (Map.Entry<String, List<Shipment>> e : assignment.entrySet()) {
-                for (Shipment fwd : e.getValue()) {
-                    if (haversine(rLat, rLng, fwd.getDropLatitude(), fwd.getDropLongitude()) <= 1.0) {
-                        qualifying.add(e.getKey());
-                        break;
-                    }
+            // Candidates: SRs whose centroid is within ~3 km of the Reverse drop.
+            // 1 km was too tight on sparse territories (almost everything fell
+            // through to nearestCentroidSr); 3 km matches the typical inter-
+            // centroid distance for Pune-scale territories.
+            String bestNearby = null;
+            double bestNearbyDist = Double.MAX_VALUE;
+            for (Map.Entry<String, double[]> e : centroids.entrySet()) {
+                double d = haversine(rLat, rLng, e.getValue()[0], e.getValue()[1]);
+                if (d <= 3.0 && d < bestNearbyDist) {
+                    bestNearbyDist = d;
+                    bestNearby = e.getKey();
                 }
             }
 
-            String target;
-            if (qualifying.size() == 1) {
-                target = qualifying.iterator().next();
-            } else if (qualifying.size() > 1) {
-                target = nearestCentroidSr(rLat, rLng, qualifying, assignment);
-            } else {
-                target = nearestCentroidSr(rLat, rLng, srNames, assignment);
-            }
+            String target = (bestNearby != null)
+                    ? bestNearby
+                    : nearestCentroidSr(rLat, rLng, srNames, assignment);
             assignment.get(target).add(rev);
+            // Refresh that SR's centroid so subsequent picks reflect the new shipment
+            centroids.put(target, centroid(assignment.get(target)));
         }
         return assignment;
     }
@@ -789,6 +897,15 @@ public class AllocationEngineService {
     // =========================================================================
     // Phase 4 — Heavy shipment balancing
     // =========================================================================
+
+    /**
+     * Heavy-shipment transfers must respect territory geometry: only move a
+     * heavy if the candidate sits within this radius (km) of the receiving SR's
+     * centroid. Larger values cause routes to "reach" into other territories
+     * (the visual purple-route disorder); 4 km matches a typical metropolitan
+     * SR territory radius.
+     */
+    private static final double HEAVY_TRANSFER_MAX_DISTANCE_KM = 4.0;
 
     Map<String, List<Shipment>> balanceHeavy(Map<String, List<Shipment>> assignment) {
         if (assignment.size() < 2) return assignment;
@@ -818,6 +935,20 @@ public class AllocationEngineService {
                                     underCentroid[0], underCentroid[1]))
                             .thenComparing(Shipment::getShippingId))
                     .orElseThrow();
+
+            // Geographic-integrity guard: skip the transfer if even the closest
+            // heavy candidate is too far from the receiving SR's territory.
+            // Without this, balanceHeavy could move a heavy across the entire
+            // city just to even out heavy counts by ±1.
+            double candidateDist = haversine(toMove.getDropLatitude(), toMove.getDropLongitude(),
+                    underCentroid[0], underCentroid[1]);
+            if (candidateDist > HEAVY_TRANSFER_MAX_DISTANCE_KM) {
+                log.debug("balanceHeavy: skipping cross-territory transfer of '{}' " +
+                        "({} km from {}'s centroid > {} km cap)",
+                        toMove.getShippingId(), String.format("%.1f", candidateDist),
+                        underloaded, HEAVY_TRANSFER_MAX_DISTANCE_KM);
+                break; // No safe transfer available — accept current imbalance
+            }
 
             assignment.get(overloaded).remove(toMove);
             assignment.get(underloaded).add(toMove);

@@ -27,236 +27,285 @@
     function onGoogleMapsReady() { gmapReady = true; }
   </script>
   <style>
+/* =========================================================================
+   Design system aligned with allocation-1.vercel.app + allocationrideraffinityzones
+   ========================================================================= */
+:root{
+  --primary:#2563eb;
+  --primary-dark:#1e40af;
+  --primary-light:#dbeafe;
+  --primary-50:#eff6ff;
+  --bg:#f3f4f6;
+  --bg-card:#ffffff;
+  --bg-soft:#f9fafb;
+  --border:#e5e7eb;
+  --border-strong:#d1d5db;
+  --text:#111827;
+  --text-sub:#6b7280;
+  --text-mute:#9ca3af;
+  --success:#10b981;
+  --success-bg:#d1fae5;
+  --warning:#f59e0b;
+  --warning-bg:#fef3c7;
+  --danger:#ef4444;
+  --danger-bg:#fee2e2;
+  --purple:#8b5cf6;
+  --purple-bg:#ede9fe;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.04);
+  --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:0 4px 12px rgba(0,0,0,.08);
+  --radius-sm:6px;
+  --radius:8px;
+  --radius-lg:12px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:#f0f2f5}
-#header{background:linear-gradient(135deg,#1565c0,#1976d2);color:#fff;padding:0 14px;height:36px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:0 1px 4px rgba(0,0,0,.2);z-index:1000}
-#header h1{font-size:.9rem;font-weight:700;letter-spacing:.3px}
-#header-right{display:flex;align-items:center;gap:8px;font-size:.78rem;flex-wrap:wrap}
-#hub-info{opacity:.9}
-.api-badge{border-radius:20px;padding:2px 8px;font-size:.72rem;white-space:nowrap;border:1px solid rgba(255,255,255,.35)}
-.api-badge.active{background:rgba(67,160,71,.45);border-color:rgba(67,160,71,.7)}
-.api-badge.inactive{background:rgba(255,255,255,.12)}
-#main{display:flex;flex:1;overflow:hidden}
-#sidebar{width:430px;flex-shrink:0;overflow-y:auto;background:#f8f9fa;border-right:1px solid #dee2e6;display:flex;flex-direction:column}
-#sidebar::-webkit-scrollbar{width:6px}
-#sidebar::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:3px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+#header{background:var(--bg-card);color:var(--text);padding:0 20px;height:60px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:var(--shadow-sm);border-bottom:1px solid var(--border);z-index:1000}
+#header h1{font-size:1.05rem;font-weight:600;letter-spacing:-.01em;color:var(--text);display:flex;align-items:center;gap:8px}
+#header-right{display:flex;align-items:center;gap:10px;font-size:.78rem;flex-wrap:wrap;color:var(--text-sub)}
+#hub-info{font-weight:600;color:var(--text);background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 12px;display:inline-flex;align-items:center;gap:6px}
+.api-badge{border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:600;white-space:nowrap;border:1px solid var(--border)}
+.api-badge.active{background:var(--success-bg);border-color:var(--success);color:#065f46}
+.api-badge.inactive{background:var(--bg-soft);color:var(--text-mute)}
+#main{display:flex;flex:1;overflow:hidden;background:var(--bg)}
+#sidebar{width:430px;flex-shrink:0;overflow-y:auto;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:14px;gap:14px}
+#sidebar::-webkit-scrollbar{width:8px}
+#sidebar::-webkit-scrollbar-track{background:transparent}
+#sidebar::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:4px;border:2px solid var(--bg)}
+#sidebar::-webkit-scrollbar-thumb:hover{background:#9ca3af}
 #map-container{flex:1;position:relative}
 #map{width:100%;height:100%}
-.panel{background:#fff;border-bottom:1px solid #e9ecef;padding:14px 16px}
-.panel-title{font-size:.88rem;font-weight:700;color:#343a40;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
-.panel-title span.badge{background:#1976d2;color:#fff;border-radius:12px;padding:2px 8px;font-size:.7rem;font-weight:600}
-#drop-zone{border:2px dashed #adb5bd;border-radius:8px;padding:20px 14px;text-align:center;cursor:pointer;transition:all .2s;color:#6c757d;font-size:.83rem;background:#fafbfc;user-select:none}
-#drop-zone:hover,#drop-zone.drag-over{border-color:#1976d2;background:#e8f0fe;color:#1565c0}
-#drop-zone svg{display:block;margin:0 auto 6px}
-#file-info{margin-top:7px;font-size:.78rem;color:#495057;display:none;line-height:1.5}
-#upload-btn{margin-top:8px;width:100%;padding:8px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:.83rem;font-weight:600;cursor:pointer;transition:background .2s;display:none}
-#upload-btn:hover:not(:disabled){background:#1565c0}
-#upload-btn:disabled{background:#90a4ae;cursor:not-allowed}
-.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px}
+.panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;box-shadow:var(--shadow-sm)}
+.panel-title{font-size:.95rem;font-weight:600;color:var(--text);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;letter-spacing:-.01em}
+.panel-title span.badge{background:var(--primary-light);color:var(--primary-dark);border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:600}
+#drop-zone{border:2px dashed var(--border-strong);border-radius:var(--radius);padding:24px 14px;text-align:center;cursor:pointer;transition:all .2s;color:var(--text-sub);font-size:.85rem;background:var(--bg-soft);user-select:none}
+#drop-zone:hover,#drop-zone.drag-over{border-color:var(--primary);background:var(--primary-50);color:var(--primary-dark)}
+#drop-zone svg{display:block;margin:0 auto 8px}
+#file-info{margin-top:10px;font-size:.8rem;color:var(--text-sub);display:none;line-height:1.5}
+#upload-btn{margin-top:10px;width:100%;padding:10px 16px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:.85rem;font-weight:600;cursor:pointer;transition:background .15s,transform .05s;display:none}
+#upload-btn:hover:not(:disabled){background:var(--primary-dark)}
+#upload-btn:active:not(:disabled){transform:translateY(1px)}
+#upload-btn:disabled{background:#cbd5e1;cursor:not-allowed}
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-/* ── Allocation loading overlay ────────────────────────────────────────────
-   Full-screen translucent backdrop shown while /api/allocate is in flight.
-   Blocks clicks on map + sidebar so users can't double-trigger requests. */
-#alloc-loading-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:99999;animation:fadeIn .25s ease-out}
+/* ── Allocation loading overlay ──────────────────────────────────────────── */
+#alloc-loading-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:99999;animation:fadeIn .2s ease-out}
 #alloc-loading-overlay.show{display:flex}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.alloc-loading-card{background:#fff;border-radius:14px;padding:26px 34px;box-shadow:0 14px 40px rgba(0,0,0,.35);min-width:300px;max-width:420px;text-align:center}
-.alloc-loading-card .ring{width:56px;height:56px;margin:0 auto 14px;border:5px solid #e3f2fd;border-top-color:#1976d2;border-right-color:#1976d2;border-radius:50%;animation:spin .9s linear infinite}
-.alloc-loading-card .title{font-size:1rem;font-weight:700;color:#0d47a1;margin-bottom:5px}
-.alloc-loading-card .sub{font-size:.82rem;color:#546e7a;line-height:1.45}
-.alloc-loading-card .stage{margin-top:12px;font-size:.74rem;color:#1976d2;font-weight:600;letter-spacing:.3px;text-transform:uppercase;min-height:14px}
-.alloc-loading-card .bar{margin-top:10px;height:5px;background:#e3f2fd;border-radius:3px;overflow:hidden;position:relative}
-.alloc-loading-card .bar::before{content:'';position:absolute;top:0;left:-40%;width:40%;height:100%;background:linear-gradient(90deg,transparent,#1976d2,transparent);animation:slide 1.3s ease-in-out infinite}
+.alloc-loading-card{background:var(--bg-card);border-radius:var(--radius-lg);padding:28px 36px;box-shadow:0 20px 50px rgba(0,0,0,.25);min-width:320px;max-width:440px;text-align:center;border:1px solid var(--border)}
+.alloc-loading-card .ring{width:52px;height:52px;margin:0 auto 14px;border:4px solid var(--primary-light);border-top-color:var(--primary);border-right-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+.alloc-loading-card .title{font-size:1rem;font-weight:600;color:var(--text);margin-bottom:6px;letter-spacing:-.01em}
+.alloc-loading-card .sub{font-size:.82rem;color:var(--text-sub);line-height:1.5}
+.alloc-loading-card .stage{margin-top:14px;font-size:.72rem;color:var(--primary);font-weight:600;letter-spacing:.4px;text-transform:uppercase;min-height:14px}
+.alloc-loading-card .bar{margin-top:12px;height:4px;background:var(--primary-light);border-radius:999px;overflow:hidden;position:relative}
+.alloc-loading-card .bar::before{content:'';position:absolute;top:0;left:-40%;width:40%;height:100%;background:linear-gradient(90deg,transparent,var(--primary),transparent);animation:slide 1.3s ease-in-out infinite}
 @keyframes slide{to{left:100%}}
-.result-card{margin-top:8px;padding:10px;border-radius:8px;font-size:.8rem}
-.result-card.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
-.result-card.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
-.result-card.info{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
+.result-card{margin-top:10px;padding:12px 14px;border-radius:var(--radius);font-size:.82rem;border:1px solid var(--border)}
+.result-card.success{background:var(--success-bg);border-color:#a7f3d0;color:#065f46}
+.result-card.error{background:var(--danger-bg);border-color:#fecaca;color:#991b1b}
+.result-card.info{background:var(--primary-50);border-color:#bfdbfe;color:var(--primary-dark)}
 .result-card .stat-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
 .result-card .stat{text-align:center}
 .result-card .stat .val{font-size:1.1rem;font-weight:700}
-.result-card .stat .lbl{font-size:.7rem;color:#555;margin-top:1px}
-.date-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
-.date-chip{background:#1976d2;color:#fff;border:none;border-radius:14px;padding:2px 9px;font-size:.73rem;cursor:pointer;transition:background .2s}
-.date-chip:hover{background:#1565c0}
-.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:5px 0;font-size:.78rem;font-weight:600;user-select:none}
+.result-card .stat .lbl{font-size:.7rem;color:var(--text-sub);margin-top:1px}
+.date-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.date-chip{background:var(--primary);color:#fff;border:none;border-radius:999px;padding:4px 12px;font-size:.73rem;font-weight:500;cursor:pointer;transition:background .15s}
+.date-chip:hover{background:var(--primary-dark)}
+.collapsible-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;font-size:.8rem;font-weight:600;user-select:none}
 .collapsible-header .arrow{transition:transform .2s;font-size:.68rem}
 .collapsible-header.open .arrow{transform:rotate(180deg)}
-.collapsible-body{display:none;font-size:.76rem;max-height:100px;overflow-y:auto;padding:3px 0}
+.collapsible-body{display:none;font-size:.78rem;max-height:120px;overflow-y:auto;padding:4px 0}
 .collapsible-body.open{display:block}
-.warn-section{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:7px 9px;margin-top:7px}
-.err-section{background:#ffebee;border:1px solid #ef9a9a;border-radius:6px;padding:7px 9px;margin-top:7px}
-.warn-section .collapsible-header{color:#e65100}
-.err-section .collapsible-header{color:#b71c1c}
-.warn-item,.err-item{padding:2px 0;border-bottom:1px solid rgba(0,0,0,.06);line-height:1.4}
-select{width:100%;padding:6px 9px;border:1px solid #ced4da;border-radius:6px;font-size:.83rem;background:#fff;color:#343a40;margin-bottom:8px}
-select:focus{outline:none;border-color:#1976d2;box-shadow:0 0 0 2px rgba(25,118,210,.15)}
-.btn-row{display:flex;gap:6px;flex-wrap:wrap}
-.btn{padding:7px 12px;border:none;border-radius:6px;font-size:.8rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
-.btn-primary{background:#1976d2;color:#fff}
-.btn-primary:hover:not(:disabled){background:#1565c0}
-.btn-primary:disabled{background:#90a4ae;cursor:not-allowed}
-.btn-google{background:#1b8a3c;color:#fff;border:2px solid #155d2a}
-.btn-google:hover:not(:disabled){background:#155d2a}
-.btn-google:disabled{background:#90a4ae;border-color:#90a4ae;cursor:not-allowed}
-.btn-compare{background:#6a1b9a;color:#fff}
-.btn-compare:hover:not(:disabled){background:#4a148c}
-.btn-compare:disabled{background:#90a4ae;cursor:not-allowed}
-.btn-secondary{background:#e9ecef;color:#495057;border:1px solid #ced4da}
-.btn-secondary:hover:not(:disabled){background:#dee2e6}
+.warn-section{background:var(--warning-bg);border:1px solid #fde68a;border-radius:var(--radius);padding:8px 11px;margin-top:8px}
+.err-section{background:var(--danger-bg);border:1px solid #fecaca;border-radius:var(--radius);padding:8px 11px;margin-top:8px}
+.warn-section .collapsible-header{color:#92400e}
+.err-section .collapsible-header{color:#991b1b}
+.warn-item,.err-item{padding:3px 0;border-bottom:1px solid rgba(0,0,0,.05);line-height:1.4}
+select{width:100%;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:.85rem;background:var(--bg-card);color:var(--text);margin-bottom:10px;font-family:inherit;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.btn{padding:9px 14px;border:1px solid transparent;border-radius:var(--radius-sm);font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit;letter-spacing:-.005em}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn-primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.btn-primary:hover:not(:disabled){background:var(--primary-dark);border-color:var(--primary-dark)}
+.btn-primary:disabled{background:#cbd5e1;border-color:#cbd5e1;cursor:not-allowed}
+.btn-google{background:var(--success);color:#fff;border-color:var(--success)}
+.btn-google:hover:not(:disabled){background:#059669;border-color:#059669}
+.btn-google:disabled{background:#cbd5e1;border-color:#cbd5e1;cursor:not-allowed}
+.btn-compare{background:var(--purple);color:#fff;border-color:var(--purple)}
+.btn-compare:hover:not(:disabled){background:#7c3aed;border-color:#7c3aed}
+.btn-compare:disabled{background:#cbd5e1;border-color:#cbd5e1;cursor:not-allowed}
+.btn-secondary{background:var(--bg-card);color:var(--text);border:1px solid var(--border-strong)}
+.btn-secondary:hover:not(:disabled){background:var(--bg-soft);border-color:var(--text-mute)}
 .btn-secondary:disabled{opacity:.5;cursor:not-allowed}
-.banner{padding:7px 10px;border-radius:6px;font-size:.8rem;font-weight:600;margin-top:7px;display:none}
-.banner.error{background:#ffebee;border:1px solid #ef9a9a;color:#b71c1c}
-.banner.success{background:#e8f5e9;border:1px solid #a5d6a7;color:#1b5e20}
-.banner.info{background:#e3f2fd;border:1px solid #90caf9;color:#0d47a1}
-.sr-attendance-item{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f3f5;font-size:.81rem}
+.banner{padding:10px 14px;border-radius:var(--radius);font-size:.82rem;font-weight:500;margin-top:10px;display:none;border:1px solid transparent}
+.banner.error{background:var(--danger-bg);border-color:#fecaca;color:#991b1b}
+.banner.success{background:var(--success-bg);border-color:#a7f3d0;color:#065f46}
+.banner.info{background:var(--primary-50);border-color:#bfdbfe;color:var(--primary-dark)}
+.sr-attendance-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:.83rem}
 .sr-attendance-item:last-child{border-bottom:none}
-.toggle-switch{position:relative;display:inline-block;width:36px;height:19px;flex-shrink:0}
+.toggle-switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0}
 .toggle-switch input{opacity:0;width:0;height:0}
-.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:19px;transition:.3s}
-.toggle-slider:before{content:'';position:absolute;width:13px;height:13px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
-input:checked+.toggle-slider{background:#43a047}
-input:checked+.toggle-slider:before{transform:translateX(17px)}
+.toggle-slider{position:absolute;cursor:pointer;inset:0;background:#d1d5db;border-radius:999px;transition:.25s}
+.toggle-slider:before{content:'';position:absolute;width:14px;height:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+input:checked+.toggle-slider{background:var(--success)}
+input:checked+.toggle-slider:before{transform:translateX(16px)}
 .toggle-switch input:disabled+.toggle-slider{opacity:.5;cursor:not-allowed}
-.summary-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-.stat-box{background:#f8f9fa;border:1px solid #e9ecef;border-radius:7px;padding:9px;text-align:center}
-.stat-box .val{font-size:1.2rem;font-weight:700;color:#1565c0}
-.stat-box .lbl{font-size:.7rem;color:#6c757d;margin-top:2px}
-.sr-item{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:7px;cursor:pointer;transition:background .15s;border:1px solid transparent;margin-bottom:3px}
-.sr-item:hover{background:#e8f0fe;border-color:#bbdefb}
-.sr-item.active{background:#e3f2fd;border-color:#1976d2}
-.sr-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.summary-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat-box{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 10px;text-align:center;transition:border-color .15s}
+.stat-box:hover{border-color:var(--border-strong)}
+.stat-box .val{font-size:1.35rem;font-weight:700;color:var(--text);letter-spacing:-.02em}
+.stat-box .lbl{font-size:.7rem;color:var(--text-sub);margin-top:4px;font-weight:500;letter-spacing:.02em;text-transform:uppercase}
+.sr-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);cursor:pointer;transition:all .15s;border:1px solid var(--border);background:var(--bg-card);margin-bottom:6px}
+.sr-item:hover{background:var(--primary-50);border-color:#bfdbfe}
+.sr-item.active{background:var(--primary-50);border-color:var(--primary)}
+.sr-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px var(--bg-card)}
 .sr-item-info{flex:1;min-width:0}
-.sr-item-name{font-size:.83rem;font-weight:600;color:#212529}
-.sr-item-sub{font-size:.71rem;color:#6c757d;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sr-item-badge{background:#1976d2;color:#fff;border-radius:11px;padding:2px 7px;font-size:.7rem;font-weight:700;flex-shrink:0}
+.sr-item-name{font-size:.85rem;font-weight:600;color:var(--text)}
+.sr-item-sub{font-size:.72rem;color:var(--text-sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-item-badge{background:var(--primary);color:#fff;border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:700;flex-shrink:0;min-width:32px;text-align:center}
 /* ── Timeline dropdown ── */
-.sr-timeline{display:none;background:#f8f9fa;border:1px solid #e9ecef;border-radius:0 0 7px 7px;margin-top:-3px;margin-bottom:3px;padding:0;overflow:hidden;font-size:.74rem}
+.sr-timeline{display:none;background:var(--bg-soft);border:1px solid var(--border);border-radius:0 0 var(--radius) var(--radius);margin-top:-4px;margin-bottom:6px;padding:0;overflow:hidden;font-size:.76rem}
 .sr-timeline.open{display:block}
-.sr-timeline-header{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:#e3f2fd;border-bottom:1px solid #bbdefb;font-size:.76rem;font-weight:600;color:#0d47a1}
-.sr-timeline-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px 10px;border-bottom:1px solid #e9ecef}
-.sr-tl-stat{text-align:center;background:#fff;border-radius:4px;padding:4px 2px}
-.sr-tl-stat .v{font-size:.82rem;font-weight:700;color:#1565c0}
-.sr-tl-stat .l{font-size:.62rem;color:#6c757d;margin-top:1px}
-.sr-tl-stops{max-height:260px;overflow-y:auto;padding:4px 0}
-.sr-tl-stops::-webkit-scrollbar{width:4px}
-.sr-tl-stops::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:2px}
-.tl-row{display:flex;align-items:flex-start;gap:0;padding:0 10px}
-.tl-spine{display:flex;flex-direction:column;align-items:center;width:20px;flex-shrink:0;padding-top:2px}
-.tl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 2px currentColor}
-.tl-line{width:2px;flex:1;min-height:14px;background:#dee2e6}
-.tl-content{flex:1;padding:2px 0 8px 6px;min-width:0}
-.tl-time{font-size:.7rem;font-weight:700;color:#343a40;white-space:nowrap}
-.tl-label{font-size:.72rem;color:#495057;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tl-meta{font-size:.67rem;color:#6c757d;margin-top:1px}
-.tl-travel-badge{display:inline-block;background:#e3f2fd;color:#1565c0;border-radius:3px;padding:1px 4px;font-size:.65rem;font-weight:600;margin-right:3px}
-.tl-break-row{background:#fff8e1;border-left:3px solid #ffb300;margin:2px 10px;padding:4px 8px;border-radius:0 4px 4px 0;font-size:.7rem;color:#e65100;font-weight:600}
-.tl-loading{padding:12px 10px;text-align:center;color:#6c757d;font-size:.76rem}
-.tl-expand-btn{padding:2px 7px;font-size:.68rem;font-weight:600;border:1px solid #90caf9;border-radius:4px;background:#e3f2fd;color:#1565c0;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:background .15s}
-.tl-expand-btn:hover{background:#bbdefb}
-.tl-expand-btn.open{background:#1976d2;color:#fff;border-color:#1976d2}
-.route-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px}
-.stop-list{max-height:260px;overflow-y:auto}
-.stop-list::-webkit-scrollbar{width:4px}
-.stop-list::-webkit-scrollbar-thumb{background:#c1c8d0;border-radius:2px}
-.stop-item{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px solid #f1f3f5;font-size:.78rem;cursor:pointer}
-.stop-item:hover{background:#f8f9fa}
+.sr-timeline-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--primary-50);border-bottom:1px solid #bfdbfe;font-size:.78rem;font-weight:600;color:var(--primary-dark)}
+.sr-timeline-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px;border-bottom:1px solid var(--border)}
+.sr-tl-stat{text-align:center;background:var(--bg-card);border-radius:var(--radius-sm);padding:6px 2px;border:1px solid var(--border)}
+.sr-tl-stat .v{font-size:.86rem;font-weight:700;color:var(--primary-dark)}
+.sr-tl-stat .l{font-size:.62rem;color:var(--text-sub);margin-top:2px;font-weight:500;text-transform:uppercase;letter-spacing:.02em}
+.sr-tl-stops{max-height:280px;overflow-y:auto;padding:6px 0}
+.sr-tl-stops::-webkit-scrollbar{width:6px}
+.sr-tl-stops::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+.tl-row{display:flex;align-items:flex-start;gap:0;padding:0 12px}
+.tl-spine{display:flex;flex-direction:column;align-items:center;width:22px;flex-shrink:0;padding-top:3px}
+.tl-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:2px solid var(--bg-card);box-shadow:0 0 0 2px currentColor}
+.tl-line{width:2px;flex:1;min-height:16px;background:var(--border)}
+.tl-content{flex:1;padding:2px 0 10px 8px;min-width:0}
+.tl-time{font-size:.72rem;font-weight:700;color:var(--text);white-space:nowrap}
+.tl-label{font-size:.74rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-meta{font-size:.68rem;color:var(--text-sub);margin-top:2px}
+.tl-travel-badge{display:inline-block;background:var(--primary-light);color:var(--primary-dark);border-radius:4px;padding:2px 5px;font-size:.65rem;font-weight:600;margin-right:4px}
+.tl-break-row{background:var(--warning-bg);border-left:3px solid var(--warning);margin:3px 12px;padding:5px 10px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;font-size:.72rem;color:#92400e;font-weight:600}
+.tl-loading{padding:14px 10px;text-align:center;color:var(--text-sub);font-size:.78rem}
+.tl-expand-btn{padding:4px 10px;font-size:.7rem;font-weight:600;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-card);color:var(--primary-dark);cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .15s}
+.tl-expand-btn:hover{background:var(--primary-50);border-color:var(--primary)}
+.tl-expand-btn.open{background:var(--primary);color:#fff;border-color:var(--primary)}
+.route-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.stop-list{max-height:280px;overflow-y:auto}
+.stop-list::-webkit-scrollbar{width:6px}
+.stop-list::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+.stop-item{display:flex;align-items:flex-start;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.8rem;cursor:pointer;transition:background .15s;border-radius:var(--radius-sm)}
+.stop-item:hover{background:var(--bg-soft)}
 .stop-item:last-child{border-bottom:none}
-.stop-seq{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
+.stop-seq{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;color:#fff;flex-shrink:0;margin-top:1px}
 .stop-info{flex:1;min-width:0}
-.stop-pincode{font-weight:600;color:#212529}
-.stop-id{color:#6c757d;font-size:.72rem;margin-top:1px;word-break:break-all}
-.stop-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
-.stop-tag{background:#e9ecef;color:#495057;border-radius:4px;padding:1px 4px;font-size:.68rem}
-.stop-tag.override{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
-.stop-tag.oor{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
-.stop-tag.heavy{background:#f3e5f5;color:#6a1b9a}
-#map-legend{position:absolute;bottom:8px;left:8px;z-index:10001;background:rgba(255,255,255,.92);border:1px solid #ccc;border-radius:6px;padding:0;font-size:.65rem;max-width:150px;box-shadow:0 1px 4px rgba(0,0,0,.15);overflow:hidden}
+.stop-pincode{font-weight:600;color:var(--text)}
+.stop-id{color:var(--text-sub);font-size:.72rem;margin-top:2px;word-break:break-all}
+.stop-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.stop-tag{background:var(--bg-soft);color:var(--text-sub);border-radius:var(--radius-sm);padding:2px 6px;font-size:.68rem;border:1px solid var(--border)}
+.stop-tag.override{background:var(--warning-bg);color:#92400e;border-color:#fde68a}
+.stop-tag.oor{background:var(--danger-bg);color:#991b1b;border-color:#fecaca}
+.stop-tag.heavy{background:var(--purple-bg);color:#6d28d9;border-color:#ddd6fe}
+#map-legend{position:absolute;bottom:12px;left:12px;z-index:10001;background:rgba(255,255,255,.96);border:1px solid var(--border);border-radius:var(--radius);padding:0;font-size:.7rem;max-width:180px;box-shadow:var(--shadow-md);overflow:hidden;backdrop-filter:blur(4px)}
 #map-legend.collapsed #legend-items{display:none}
-#map-legend h4{font-size:.68rem;font-weight:700;margin:0;padding:5px 8px;color:#343a40;cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none}
+#map-legend h4{font-size:.72rem;font-weight:600;margin:0;padding:8px 12px;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:space-between;user-select:none;letter-spacing:-.005em}
 #map-legend h4 .legend-toggle{font-size:.6rem;opacity:.6}
-#legend-items{max-height:160px;overflow-y:auto;padding:0 8px 5px}
-.legend-item{display:flex;align-items:center;gap:4px;padding:1px 0;font-size:.63rem;line-height:1.3}
-.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.legend-line{width:16px;height:2px;flex-shrink:0;border-radius:2px}
+#legend-items{max-height:180px;overflow-y:auto;padding:4px 12px 8px}
+.legend-item{display:flex;align-items:center;gap:6px;padding:2px 0;font-size:.68rem;line-height:1.35}
+.legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.legend-line{width:18px;height:2px;flex-shrink:0;border-radius:2px}
 .legend-line.dashed{background:repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px)}
 /* Comparison mode indicator */
-#compare-banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(106,27,154,.9);color:#fff;padding:5px 14px;border-radius:20px;font-size:.78rem;font-weight:600;display:none;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-dialog{border:none;border-radius:12px;padding:0;box-shadow:0 8px 32px rgba(0,0,0,.25);max-width:400px;width:90%}
-dialog::backdrop{background:rgba(0,0,0,.45)}
-.modal-header{background:#1976d2;color:#fff;padding:13px 17px;border-radius:12px 12px 0 0;font-weight:700;font-size:.93rem}
-.modal-body{padding:15px 17px}
-.modal-info{background:#f8f9fa;border-radius:6px;padding:9px;margin-bottom:10px;font-size:.81rem}
-.modal-info strong{color:#1565c0}
-.sr-radio-list{max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:5px}
-.sr-radio-item{display:flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #dee2e6;border-radius:6px;cursor:pointer;transition:background .15s;font-size:.81rem}
-.sr-radio-item:hover{background:#e8f0fe}
-.sr-radio-item input{accent-color:#1976d2}
-.modal-footer{display:flex;justify-content:flex-end;gap:7px;padding:11px 17px;border-top:1px solid #e9ecef}
-.leaflet-popup-content{font-size:.8rem;min-width:175px}
-.popup-title{font-weight:700;font-size:.86rem;margin-bottom:5px;color:#1565c0}
-.popup-row{display:flex;justify-content:space-between;gap:7px;padding:2px 0;border-bottom:1px solid #f1f3f5}
+#compare-banner{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--purple);color:#fff;padding:7px 18px;border-radius:999px;font-size:.78rem;font-weight:600;display:none;white-space:nowrap;box-shadow:0 4px 12px rgba(139,92,246,.4)}
+dialog{border:none;border-radius:var(--radius-lg);padding:0;box-shadow:0 25px 50px -12px rgba(0,0,0,.25);max-width:500px;width:90%;background:var(--bg-card)}
+dialog::backdrop{background:rgba(15,23,42,.5);backdrop-filter:blur(2px)}
+.modal-header{background:var(--bg-card);color:var(--text);padding:18px 22px;border-radius:var(--radius-lg) var(--radius-lg) 0 0;font-weight:600;font-size:1rem;border-bottom:1px solid var(--border);letter-spacing:-.01em;display:flex;align-items:center;justify-content:space-between}
+.modal-body{padding:18px 22px}
+.modal-info{background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:14px;font-size:.83rem;color:var(--text-sub)}
+.modal-info strong{color:var(--text)}
+.sr-radio-list{max-height:230px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.sr-radio-item{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .15s;font-size:.83rem;background:var(--bg-card)}
+.sr-radio-item:hover{background:var(--primary-50);border-color:#bfdbfe}
+.sr-radio-item input{accent-color:var(--primary)}
+.modal-footer{display:flex;justify-content:flex-end;gap:8px;padding:14px 22px 18px;border-top:1px solid var(--border);background:var(--bg-soft);border-radius:0 0 var(--radius-lg) var(--radius-lg)}
+.leaflet-popup-content-wrapper{border-radius:var(--radius);box-shadow:0 10px 25px rgba(0,0,0,.15)}
+.leaflet-popup-content{font-size:.82rem;min-width:190px;margin:14px}
+.popup-title{font-weight:600;font-size:.88rem;margin-bottom:8px;color:var(--text);letter-spacing:-.01em}
+.popup-row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem}
 .popup-row:last-of-type{border-bottom:none}
-.popup-label{color:#6c757d}
-.popup-val{font-weight:600;color:#212529}
-.popup-oor{background:#ffebee;color:#c62828;border-radius:4px;padding:1px 5px;font-size:.7rem;font-weight:700;display:inline-block;margin-top:3px}
-.popup-reassign{margin-top:7px;width:100%;padding:5px;background:#1976d2;color:#fff;border:none;border-radius:5px;font-size:.76rem;font-weight:600;cursor:pointer}
-.popup-reassign:hover{background:#1565c0}
+.popup-label{color:var(--text-sub)}
+.popup-val{font-weight:600;color:var(--text)}
+.popup-oor{background:var(--danger-bg);color:#991b1b;border-radius:var(--radius-sm);padding:2px 8px;font-size:.7rem;font-weight:600;display:inline-block;margin-top:4px}
+.popup-reassign{margin-top:10px;width:100%;padding:8px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:.78rem;font-weight:600;cursor:pointer;transition:background .15s}
+.popup-reassign:hover{background:var(--primary-dark)}
 .hidden{display:none!important}
-.loading-text{color:#6c757d;font-size:.8rem;text-align:center;padding:10px 0}
-.empty-text{color:#adb5bd;font-size:.8rem;text-align:center;padding:14px 0;font-style:italic}
+.loading-text{color:var(--text-sub);font-size:.82rem;text-align:center;padding:14px 0}
+.empty-text{color:var(--text-mute);font-size:.82rem;text-align:center;padding:18px 0;font-style:italic}
 .map-fullscreen #sidebar{display:none!important}
 .map-fullscreen #map-container{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999}
 .map-fullscreen #header{display:none!important}
-.map-fullscreen #fullscreen-btn{top:10px;right:10px}
+.map-fullscreen #fullscreen-btn{top:12px;right:12px}
 /* Affinity status badges */
-.affinity-badge{display:inline-block;border-radius:10px;padding:1px 7px;font-size:.67rem;font-weight:700;flex-shrink:0;white-space:nowrap}
-.affinity-badge.assigned{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
-.affinity-badge.non-affinity{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
+.affinity-badge{display:inline-block;border-radius:999px;padding:3px 10px;font-size:.68rem;font-weight:600;flex-shrink:0;white-space:nowrap;border:1px solid transparent}
+.affinity-badge.assigned{background:var(--success-bg);color:#065f46;border-color:#a7f3d0}
+.affinity-badge.non-affinity{background:var(--warning-bg);color:#92400e;border-color:#fde68a}
 /* Shift utilisation progress bar */
-.util-bar-wrap{flex:1;background:#e9ecef;border-radius:4px;height:7px;overflow:hidden;min-width:40px}
-.util-bar{height:100%;border-radius:4px;transition:width .3s}
-.util-bar.low{background:#43a047}
-.util-bar.mid{background:#fb8c00}
-.util-bar.high{background:#e53935}
+.util-bar-wrap{flex:1;background:var(--border);border-radius:999px;height:8px;overflow:hidden;min-width:50px}
+.util-bar{height:100%;border-radius:999px;transition:width .3s}
+.util-bar.low{background:var(--success)}
+.util-bar.mid{background:var(--warning)}
+.util-bar.high{background:var(--danger)}
 /* LM Integration */
-.lm-sr-row{display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f1f3f5;font-size:.78rem}
+.lm-sr-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:.8rem}
 .lm-sr-row:last-child{border-bottom:none}
-.lm-sr-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.lm-sr-name{font-weight:600;min-width:55px;flex-shrink:0}
-.lm-sr-count{font-size:.7rem;color:#6c757d;min-width:25px;flex-shrink:0}
-.lm-sr-input{flex:1;padding:3px 5px;border:1px solid #ced4da;border-radius:4px;font-size:.74rem;min-width:0}
-.lm-sr-status{width:16px;height:16px;flex-shrink:0;text-align:center;font-size:.7rem}
+.lm-sr-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.lm-sr-name{font-weight:600;min-width:60px;flex-shrink:0;color:var(--text)}
+.lm-sr-count{font-size:.72rem;color:var(--text-sub);min-width:28px;flex-shrink:0}
+.lm-sr-input{flex:1;padding:6px 8px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:.76rem;min-width:0;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.lm-sr-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.lm-sr-status{width:18px;height:18px;flex-shrink:0;text-align:center;font-size:.72rem}
 /* Region Health Panel */
-.region-card{border-radius:8px;padding:10px 12px;margin-bottom:8px;border:1px solid #e9ecef;background:#fff}
-.region-card.healthy{border-left:4px solid #43a047}
-.region-card.overflow{border-left:4px solid #e53935}
-.region-card.idle-srs{border-left:4px solid #fb8c00}
-.region-card.underloaded{border-left:4px solid #1976d2}
-.region-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.region-card-name{font-size:.84rem;font-weight:700;color:#212529}
-.region-status-badge{border-radius:10px;padding:2px 8px;font-size:.68rem;font-weight:700;white-space:nowrap}
-.region-status-badge.healthy{background:#e8f5e9;color:#2e7d32}
-.region-status-badge.overflow{background:#ffebee;color:#c62828}
-.region-status-badge.idle-srs{background:#fff3e0;color:#e65100}
-.region-status-badge.underloaded{background:#e3f2fd;color:#1565c0}
-.region-stats-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:.74rem}
-.region-stat{text-align:center;background:#f8f9fa;border-radius:5px;padding:4px 8px;min-width:50px}
-.region-stat .v{font-size:.88rem;font-weight:700;color:#1565c0}
-.region-stat .l{font-size:.65rem;color:#6c757d;margin-top:1px}
-.region-sr-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
-.sr-chip{border-radius:10px;padding:2px 7px;font-size:.68rem;font-weight:600;white-space:nowrap}
-.sr-chip.active{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
-.sr-chip.idle{background:#ffebee;color:#c62828;border:1px solid #ef9a9a}
-.suggestion-card{background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:7px 10px;margin-top:6px;font-size:.74rem}
-.suggestion-card.high{background:#ffebee;border-color:#ef9a9a}
-.suggestion-card.medium{background:#fff3e0;border-color:#ffcc80}
-.suggestion-card.low{background:#e3f2fd;border-color:#90caf9}
-.suggestion-header{font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:5px}
-.suggestion-action{color:#495057;line-height:1.4}
-.sr-shift-input{width:55px;padding:2px 4px;border:1px solid #ced4da;border-radius:4px;font-size:.72rem;text-align:center;flex-shrink:0}
-#save-shift-durations-btn{display:none;margin-top:8px;width:100%;padding:6px 10px;font-size:.76rem;font-weight:600;border:none;border-radius:6px;cursor:pointer;background:#ff8f00;color:#fff;transition:background .15s}
-#save-shift-durations-btn:hover{background:#ff6f00}
+.region-card{border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;border:1px solid var(--border);background:var(--bg-card);transition:box-shadow .15s}
+.region-card:hover{box-shadow:var(--shadow)}
+.region-card.healthy{border-left:4px solid var(--success)}
+.region-card.overflow{border-left:4px solid var(--danger)}
+.region-card.idle-srs{border-left:4px solid var(--warning)}
+.region-card.underloaded{border-left:4px solid var(--primary)}
+.region-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.region-card-name{font-size:.88rem;font-weight:600;color:var(--text);letter-spacing:-.01em}
+.region-status-badge{border-radius:999px;padding:3px 10px;font-size:.68rem;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.region-status-badge.healthy{background:var(--success-bg);color:#065f46;border-color:#a7f3d0}
+.region-status-badge.overflow{background:var(--danger-bg);color:#991b1b;border-color:#fecaca}
+.region-status-badge.idle-srs{background:var(--warning-bg);color:#92400e;border-color:#fde68a}
+.region-status-badge.underloaded{background:var(--primary-50);color:var(--primary-dark);border-color:#bfdbfe}
+.region-stats-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.76rem}
+.region-stat{text-align:center;background:var(--bg-soft);border-radius:var(--radius-sm);padding:6px 12px;min-width:60px;border:1px solid var(--border)}
+.region-stat .v{font-size:.95rem;font-weight:700;color:var(--text)}
+.region-stat .l{font-size:.65rem;color:var(--text-sub);margin-top:2px;font-weight:500;text-transform:uppercase;letter-spacing:.02em}
+.region-sr-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.sr-chip{border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.sr-chip.active{background:var(--success-bg);color:#065f46;border-color:#a7f3d0}
+.sr-chip.idle{background:var(--danger-bg);color:#991b1b;border-color:#fecaca}
+.suggestion-card{background:var(--warning-bg);border:1px solid #fde68a;border-radius:var(--radius-sm);padding:10px 12px;margin-top:8px;font-size:.76rem}
+.suggestion-card.high{background:var(--danger-bg);border-color:#fecaca}
+.suggestion-card.medium{background:var(--warning-bg);border-color:#fde68a}
+.suggestion-card.low{background:var(--primary-50);border-color:#bfdbfe}
+.suggestion-header{font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.suggestion-action{color:var(--text-sub);line-height:1.5}
+.sr-shift-input{width:60px;padding:5px 8px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:.76rem;text-align:center;flex-shrink:0;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+.sr-shift-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+#save-shift-durations-btn{display:none;margin-top:10px;width:100%;padding:9px 14px;font-size:.82rem;font-weight:600;border:none;border-radius:var(--radius-sm);cursor:pointer;background:var(--warning);color:#fff;transition:background .15s;letter-spacing:-.005em}
+#save-shift-durations-btn:hover{background:#d97706}
+/* Inputs (text/number) — uniform style across the app */
+input[type=text],input[type=number],input[type=search]{padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:.85rem;background:var(--bg-card);color:var(--text);font-family:inherit;transition:border-color .15s,box-shadow .15s}
+input[type=text]:focus,input[type=number]:focus,input[type=search]:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+input[type=text]::placeholder,input[type=number]::placeholder,input[type=search]::placeholder{color:var(--text-mute)}
+/* Labels — make sure they don't look cramped */
+label{font-size:.8rem;color:var(--text);font-weight:500}
+/* Leaflet zoom control — match the modern look */
+.leaflet-bar a{border-radius:0;background:var(--bg-card)!important;color:var(--text)!important;border-color:var(--border)!important}
+.leaflet-bar a:first-child{border-top-left-radius:var(--radius-sm)!important;border-top-right-radius:var(--radius-sm)!important}
+.leaflet-bar a:last-child{border-bottom-left-radius:var(--radius-sm)!important;border-bottom-right-radius:var(--radius-sm)!important}
+.leaflet-bar a:hover{background:var(--bg-soft)!important}
   </style>
 </head>
 <body>
@@ -306,11 +355,11 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       <div class="panel-title">Allocation</div>
       
       <!-- Mode Toggle -->
-      <div style="display:flex;gap:4px;margin-bottom:10px;background:#f8f9fa;border-radius:6px;padding:3px">
-        <button class="btn" id="mode-standard-btn" style="flex:1;padding:6px 10px;font-size:.78rem;background:#1976d2;color:#fff;border:none">
+      <div style="display:flex;gap:4px;margin-bottom:12px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);padding:4px">
+        <button class="btn" id="mode-standard-btn" style="flex:1;padding:7px 12px;font-size:.8rem;background:var(--primary);color:#fff;border:none">
           &#x1F6E3; Standard Routing
         </button>
-        <button class="btn" id="mode-previous-btn" onclick="loadPreviousAllocation()" style="flex:1;padding:6px 10px;font-size:.78rem;background:#e9ecef;color:#495057;border:1px solid #ced4da">
+        <button class="btn" id="mode-previous-btn" onclick="loadPreviousAllocation()" style="flex:1;padding:7px 12px;font-size:.8rem;background:transparent;color:var(--text-sub);border:none">
           📊 Previous
         </button>
       </div>
@@ -350,21 +399,21 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
       </div>
 
       <!-- Allocation Mode Toggle (9.1) -->
-      <div style="display:flex;gap:4px;margin-bottom:10px;background:#f8f9fa;border-radius:6px;padding:3px" id="allocation-mode-toggle">
+      <div style="display:flex;gap:4px;margin-bottom:12px;background:var(--bg-soft);border:1px solid var(--border);border-radius:var(--radius);padding:4px" id="allocation-mode-toggle">
         <button class="btn" id="mode-count-btn"
                 onclick="setAllocationMode('count-based')"
-                style="flex:1;padding:5px 8px;font-size:.76rem">
+                style="flex:1;padding:7px 10px;font-size:.78rem;background:transparent;color:var(--text-sub);border:none">
           📊 Count-Based
         </button>
         <button class="btn" id="mode-timebased-btn"
                 onclick="setAllocationMode('time-based')"
-                style="flex:1;padding:5px 8px;font-size:.76rem">
+                style="flex:1;padding:7px 10px;font-size:.78rem;background:transparent;color:var(--text-sub);border:none">
           ⏱ Time-Based Config
         </button>
       </div>
 
       <!-- Shift duration indicator (shown in time-based mode) (9.4) -->
-      <div id="shift-duration-indicator" style="display:none;background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:.78rem;color:#0d47a1;font-weight:600;text-align:center">
+      <div id="shift-duration-indicator" style="display:none;background:var(--primary-50);border:1px solid #bfdbfe;border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-size:.8rem;color:var(--primary-dark);font-weight:600;text-align:center">
         ⏱ <span id="shift-duration-label">8 h shift</span>
       </div>
 
@@ -659,7 +708,10 @@ function showAllocError(msg) {
   var el = document.getElementById('alloc-error');
   el.textContent = msg;
   el.style.display = 'block';
-  setTimeout(function() { el.style.display = 'none'; }, 9000);
+  // Log to console so users can copy the full stack/cause from devtools.
+  try { console.error('Allocation error:', msg); } catch(e){}
+  // Keep error visible longer so users can read / screenshot it.
+  setTimeout(function() { el.style.display = 'none'; }, 20000);
 }
 
 function showAllocInfo(msg) {
@@ -1710,19 +1762,29 @@ var allocLoadingStages = [
 ];
 var allocLoadingTimer = null;
 
-function showAllocLoading(modeLabel) {
+/**
+ * Show the blocking allocation overlay.
+ * @param {string} modeLabel  - shown in the title (e.g. "OSM", "Reassigning", "Finalizing")
+ * @param {object} [opts]     - optional overrides:
+ *        { title, subtitle, stages: string[] }
+ */
+function showAllocLoading(modeLabel, opts) {
   var ov = document.getElementById('alloc-loading-overlay');
   if (!ov) return;
-  document.getElementById('alloc-loading-title').textContent = 'Running allocation (' + modeLabel + ')…';
-  document.getElementById('alloc-loading-sub').textContent =
+  opts = opts || {};
+  var title = opts.title || ('Running allocation (' + modeLabel + ')…');
+  var subtitle = opts.subtitle ||
     'Optimising routes and balancing earnings across SRs. This may take a few seconds for large datasets.';
+  document.getElementById('alloc-loading-title').textContent = title;
+  document.getElementById('alloc-loading-sub').textContent = subtitle;
+  var stages = (opts.stages && opts.stages.length) ? opts.stages : allocLoadingStages;
   var stageEl = document.getElementById('alloc-loading-stage');
   var i = 0;
-  stageEl.textContent = allocLoadingStages[0];
+  stageEl.textContent = stages[0];
   if (allocLoadingTimer) clearInterval(allocLoadingTimer);
   allocLoadingTimer = setInterval(function() {
-    i = (i + 1) % allocLoadingStages.length;
-    stageEl.textContent = allocLoadingStages[i];
+    i = (i + 1) % stages.length;
+    stageEl.textContent = stages[i];
   }, 1400);
   ov.classList.add('show');
 }
@@ -1763,12 +1825,14 @@ function runAllocation(mode) {
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     if (!res.ok) {
       hideAllocLoading();
-      // 9.9: mode-aware error message
-      if (getAllocationMode() === 'time-based') {
-        showAllocError('Allocation failed. Please check your affinity configuration. (' + res.status + ')');
-      } else {
-        showAllocError((res.data.message || res.data.error || 'Allocation failed') + ' (' + res.status + ')');
-      }
+      // Always surface the actual backend error so root cause is visible.
+      // If a meaningful message exists in the response body, use it directly;
+      // otherwise fall back to a mode-aware hint.
+      var detail = (res.data && (res.data.message || res.data.error || res.data.detail)) || '';
+      var fallback = (getAllocationMode() === 'time-based')
+        ? 'Allocation failed. Please check your affinity configuration.'
+        : 'Allocation failed.';
+      showAllocError((detail || fallback) + ' (HTTP ' + res.status + ')');
       return;
     }
     lastAllocationMode = mode;
@@ -1796,12 +1860,9 @@ function runAllocation(mode) {
     btn.disabled = false;
     btn.innerHTML = (mode === 'google' ? '&#x1F5FA; Run Allocation (Google Maps)' : '&#x1F5FA; Run Allocation (OSM)');
     hideAllocLoading();
-    // 9.9: mode-aware error message
-    if (getAllocationMode() === 'time-based') {
-      showAllocError('Allocation failed. Please check your affinity configuration.');
-    } else {
-      showAllocError('Network error: ' + e.message);
-    }
+    // Show the actual exception message — much more useful than a canned hint.
+    showAllocError('Allocation request failed: ' + (e && e.message ? e.message : e));
+    console.error('runAllocation error', e);
   });
 }
 
@@ -1824,26 +1885,44 @@ function renderSummary(s) {
     sb(s.avgShipmentsPerSr ? s.avgShipmentsPerSr.toFixed(1) : '-', 'Avg/SR');
 
   // ── Earnings fairness panel (CEO view) ─────────────────────────────────────
+  // SRs with zero earnings (no shipments assigned) are excluded from every
+  // fairness aggregate — they're idle, not "underperforming", and including
+  // them in the mean / lowest / range distorts the picture. A separate badge
+  // shows how many idle SRs were filtered out so the count isn't hidden.
   var earningsHtml = '';
-  if (s.srSummaries && s.srSummaries.length > 0 &&
-      s.srSummaries[0].netEarnings !== undefined && s.srSummaries[0].netEarnings !== 0) {
+  var nets = (s.srSummaries || [])
+      .filter(function(sr) {
+        return sr && sr.netEarnings !== undefined && sr.netEarnings !== null
+            && sr.netEarnings > 0;
+      })
+      .map(function(sr) { return { name: sr.srName, net: sr.netEarnings }; });
+  if (nets.length > 0) {
+    var idleSrCount = (s.srSummaries ? s.srSummaries.length : 0) - nets.length;
 
-    // Find highest, lowest, mean
-    var nets = s.srSummaries.map(function(sr) { return { name: sr.srName, net: sr.netEarnings || 0 }; });
     nets.sort(function(a, b) { return b.net - a.net; });
     var highest = nets[0];
     var lowest  = nets[nets.length - 1];
-    var mean    = s.meanNetEarnings !== undefined
-                    ? s.meanNetEarnings
-                    : nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
-    var range   = s.earningsRange !== undefined ? s.earningsRange : (highest.net - lowest.net);
+    // Mean is recomputed from the filtered list — even if the server sent a
+    // meanNetEarnings that included zeros, we override it here so the panel is
+    // consistent with what the user sees in the cards.
+    var mean    = nets.reduce(function(acc, x) { return acc + x.net; }, 0) / nets.length;
+    // Range is also recomputed from the filtered list (max − min of earning SRs).
+    var range   = highest.net - lowest.net;
 
-    // Calculate percentage of SRs within 10% of average
-    var threshold = mean * 0.10; // 10% of mean
-    var srsWithin10Percent = nets.filter(function(sr) {
+    // Percentage of *earning* SRs that fall within ±20% of the filtered mean.
+    // The 20% band is what the rebalancing-suggestion engine targets — every
+    // SR outside this band produces a recommended transfer below.
+    var FAIRNESS_BAND_PCT = 0.20;
+    var threshold = mean * FAIRNESS_BAND_PCT;
+    var srsWithinBand = nets.filter(function(sr) {
       return Math.abs(sr.net - mean) <= threshold;
     }).length;
-    var percentageWithin10 = (srsWithin10Percent / nets.length) * 100;
+    var percentageWithinBand = (srsWithinBand / nets.length) * 100;
+
+    var idleNote = idleSrCount > 0
+      ? ' &nbsp;|&nbsp; <span style="color:#757575">Excludes ' + idleSrCount +
+        ' idle SR' + (idleSrCount === 1 ? '' : 's') + ' (0 earnings)</span>'
+      : '';
 
     earningsHtml =
       '<div style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
@@ -1852,12 +1931,15 @@ function renderSummary(s) {
         earningsBox('&#x2B06; ' + esc(highest.name), '&#x20B9;' + highest.net.toFixed(2), 'Highest Earner', '#1b5e20', '#e8f5e9', '#a5d6a7') +
         earningsBox('&#x2B07; ' + esc(lowest.name),  '&#x20B9;' + lowest.net.toFixed(2),  'Lowest Earner',  '#b71c1c', '#ffebee', '#ef9a9a') +
         earningsBox('&#x2248; Mean', '&#x20B9;' + mean.toFixed(2), 'Avg Net Earnings', '#0d47a1', '#e3f2fd', '#90caf9') +
-        earningsBox('&#x1F4CA; ' + percentageWithin10.toFixed(1) + '%', srsWithin10Percent + ' of ' + nets.length + ' SRs', 'Within 10% of Avg', '#6a1b9a', '#f3e5f5', '#ce93d8') +
+        earningsBox('&#x1F4CA; ' + percentageWithinBand.toFixed(1) + '%', srsWithinBand + ' of ' + nets.length + ' SRs', 'Within 20% of Avg', '#6a1b9a', '#f3e5f5', '#ce93d8') +
       '</div>' +
       '<div style="margin-top:7px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 10px;font-size:.78rem">' +
         '<span style="font-weight:700;color:#e65100">Earnings Range: &#x20B9;' + range.toFixed(2) + '</span>' +
-        ' &nbsp;|&nbsp; Spread between highest and lowest earning SR' +
+        ' &nbsp;|&nbsp; Spread between highest and lowest earning SR' + idleNote +
       '</div>' +
+      // Suggestions block — recommends donor/receiver pairs and shipment
+      // counts that, if applied, would land every SR inside the ±20% band.
+      buildRebalancingSuggestionsHtml(s.srSummaries, mean, FAIRNESS_BAND_PCT) +
       '</div>';
   }
 
@@ -1929,6 +2011,129 @@ function earningsBox(title, value, label, textColor, bgColor, borderColor) {
     '<div class="val" style="color:' + textColor + ';font-size:1rem">' + value + '</div>' +
     '<div class="lbl">' + label + '</div>' +
     '</div>';
+}
+
+/**
+ * Build the "Suggested rebalancing" HTML block.
+ *
+ * Goal: emit a small set of actionable transfer suggestions that, if applied,
+ * would land every earning SR inside the ±bandPct band of the mean.
+ *
+ * Algorithm:
+ *   1. Filter out idle SRs (≤0 net earnings) — they're handled by attendance.
+ *   2. Compute each SR's deviation from the mean.
+ *   3. Pair the most over-earning donor with the most under-earning receiver,
+ *      transfer enough effective payout to bring both inside the band, repeat.
+ *   4. Convert the rupee delta to a shipment count using the donor's average
+ *      payout-per-shipment (a fair estimate of what a single transferred
+ *      shipment is worth in the rebalancer's eyes).
+ *   5. Cap at 8 suggestions to keep the panel scannable.
+ *
+ * This is a UI-side recommendation only — it does not actually move shipments.
+ * The user can apply the changes by using the Reassign button on individual
+ * stops, or by re-running allocation after adjusting SR attendance.
+ */
+function buildRebalancingSuggestionsHtml(srSummaries, mean, bandPct) {
+  if (!srSummaries || !srSummaries.length || !mean || mean <= 0) return '';
+
+  var lower = mean * (1 - bandPct);
+  var upper = mean * (1 + bandPct);
+
+  // Build a working copy of the earning SRs with mutable net values.
+  var working = srSummaries
+      .filter(function(sr) { return sr && sr.netEarnings > 0; })
+      .map(function(sr) {
+        var count = sr.shipmentCount || 0;
+        var avgPayout = count > 0 ? (sr.grossPayout || sr.netEarnings) / count : 0;
+        return {
+          name: sr.srName,
+          net: sr.netEarnings,
+          count: count,
+          // Avg effective payout per shipment — used to convert a rupee delta
+          // into a shipment count. Floor at ₹5 to avoid divide-by-zero noise.
+          avgPayout: Math.max(5, avgPayout)
+        };
+      });
+  if (working.length < 2) return '';
+
+  var suggestions = [];
+  var SUGGESTION_LIMIT = 8;
+
+  // Greedy pairing: each iteration matches the most-overloaded donor with the
+  // most-underloaded receiver, transfers just enough to bring at least one of
+  // them inside the band, and repeats until both ends are satisfied or we hit
+  // the suggestion cap.
+  while (suggestions.length < SUGGESTION_LIMIT) {
+    working.sort(function(a, b) { return b.net - a.net; });
+    var donor = working[0];
+    var receiver = working[working.length - 1];
+    if (!donor || !receiver || donor.name === receiver.name) break;
+
+    // If both are already inside the band, we're done.
+    if (donor.net <= upper && receiver.net >= lower) break;
+
+    // How much can/should we move? The transfer should not push the donor
+    // below the mean or the receiver above the mean — we just bring them
+    // each toward the centre.
+    var donorExcess = donor.net - mean;       // how much donor is above mean
+    var receiverDeficit = mean - receiver.net; // how much receiver is below mean
+    var deltaRupees = Math.max(0, Math.min(donorExcess, receiverDeficit));
+    if (deltaRupees < donor.avgPayout * 0.5) break; // less than half a shipment — stop
+
+    // Convert rupee delta to shipment count using donor's avg payout.
+    var shipments = Math.max(1, Math.round(deltaRupees / donor.avgPayout));
+    var moneyMoved = shipments * donor.avgPayout;
+
+    suggestions.push({
+      from: donor.name,
+      to: receiver.name,
+      shipments: shipments,
+      amount: moneyMoved,
+      fromNet: donor.net,
+      toNet: receiver.net
+    });
+
+    // Apply the simulated transfer to the working state and continue.
+    donor.net    -= moneyMoved;
+    receiver.net += moneyMoved;
+    donor.count    = Math.max(0, donor.count - shipments);
+    receiver.count = receiver.count + shipments;
+  }
+
+  if (suggestions.length === 0) {
+    return '<div class="rebalance-suggestions" style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+      '<div style="font-size:.78rem;font-weight:700;color:#1b5e20;margin-bottom:6px">' +
+        '&#x2705; Suggested Rebalancing' +
+      '</div>' +
+      '<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:7px;padding:10px 12px;font-size:.78rem;color:#1b5e20">' +
+        'All earning SRs are already within &plusmn;' + Math.round(bandPct * 100) + '% of the mean. No transfers required.' +
+      '</div></div>';
+  }
+
+  var rows = suggestions.map(function(sg, i) {
+    return '<div class="rebal-row" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:.78rem">' +
+      '<div style="min-width:18px;height:18px;border-radius:9px;background:#1976d2;color:#fff;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center">' + (i + 1) + '</div>' +
+      '<div style="flex:1">' +
+        'Move <b>' + sg.shipments + '</b> shipment' + (sg.shipments === 1 ? '' : 's') +
+        ' from <b style="color:#b71c1c">' + esc(sg.from) + '</b>' +
+        ' &rarr; <b style="color:#1b5e20">' + esc(sg.to) + '</b>' +
+        ' <span style="color:#757575">(~&#x20B9;' + sg.amount.toFixed(0) + ')</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="rebalance-suggestions" style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px">' +
+    '<div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:6px">' +
+      '&#x1F4A1; Suggested Rebalancing (target: all SRs within &plusmn;' + Math.round(bandPct * 100) + '% of mean)' +
+    '</div>' +
+    '<div style="background:#fff;border:1px solid #e9ecef;border-radius:7px;overflow:hidden">' +
+      rows +
+    '</div>' +
+    '<div style="margin-top:6px;font-size:.72rem;color:#757575;line-height:1.4">' +
+      'Estimates use each donor SR\'s average payout per shipment. Apply them via the Reassign button on individual stops, ' +
+      'or adjust SR attendance and re-run allocation.' +
+    '</div>' +
+  '</div>';
 }
 
 // ── SR LIST ───────────────────────────────────────────────────────────────────
@@ -2602,6 +2807,11 @@ function confirmOverride() {
   if (!selected) { alert('Please select a target SR.'); return; }
   var date = document.getElementById('date-select').value;
   document.getElementById('override-modal').close();
+  showAllocLoading('Reassign', {
+    title: 'Reassigning shipment…',
+    subtitle: 'Moving the shipment to the selected SR and re-sequencing the route.',
+    stages: ['Updating assignment', 'Re-sequencing route', 'Recomputing earnings', 'Refreshing summary']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/override', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2609,25 +2819,35 @@ function confirmOverride() {
   })
   .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
   .then(function(res) {
-    if (!res.ok) { showAllocError(res.data.message || 'Override failed'); return; }
-    refreshAllocation();
+    if (!res.ok) { hideAllocLoading(); showAllocError(res.data.message || 'Override failed'); return; }
+    refreshAllocation(true /* keepLoader */);
   })
-  .catch(function(e) { showAllocError('Override error: ' + e.message); });
+  .catch(function(e) { hideAllocLoading(); showAllocError('Override error: ' + e.message); });
 }
 
 function undoOverride() {
   var date = document.getElementById('date-select').value;
+  showAllocLoading('Undo', {
+    title: 'Undoing last override…',
+    subtitle: 'Reverting the most recent reassignment.',
+    stages: ['Reverting assignment', 'Re-sequencing route', 'Refreshing summary']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/override', { method: 'DELETE' })
     .then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Undo failed'); });
-      refreshAllocation();
+      refreshAllocation(true /* keepLoader */);
     })
-    .catch(function(e) { showAllocError('Undo error: ' + e.message); });
+    .catch(function(e) { hideAllocLoading(); showAllocError('Undo error: ' + e.message); });
 }
 
 function finalizeAllocation() {
   if (!confirm('Finalize allocation? No further overrides will be allowed.')) return;
   var date = document.getElementById('date-select').value;
+  showAllocLoading('Finalize', {
+    title: 'Finalizing allocation…',
+    subtitle: 'Locking the allocation. No further overrides will be accepted.',
+    stages: ['Validating allocation', 'Persisting final state', 'Locking overrides']
+  });
   fetch('/api/allocate/' + encodeURIComponent(date) + '/finalize', { method: 'POST' })
     .then(function(r) {
       if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Finalize failed'); });
@@ -2636,13 +2856,26 @@ function finalizeAllocation() {
       document.getElementById('undo-btn').disabled = true;
       document.getElementById('finalize-btn').disabled = true;
       document.querySelectorAll('#attendance-list input').forEach(function(el) { el.disabled = true; });
-      refreshAllocation();
+      refreshAllocation(true /* keepLoader */);
     })
-    .catch(function(e) { showAllocError('Finalize error: ' + e.message); });
+    .catch(function(e) { hideAllocLoading(); showAllocError('Finalize error: ' + e.message); });
 }
 
-function refreshAllocation() {
+/**
+ * Reload the current allocation from the server.
+ * @param {boolean} keepLoader  if true, the caller already showed the loader
+ *                              and this function will hide it after redraw.
+ */
+function refreshAllocation(keepLoader) {
   var date = document.getElementById('date-select').value;
+  var ownsLoader = !keepLoader;
+  if (ownsLoader) {
+    showAllocLoading('Refresh', {
+      title: 'Refreshing allocation…',
+      subtitle: 'Reloading the latest allocation snapshot.',
+      stages: ['Fetching summary', 'Rebuilding SR list', 'Redrawing routes']
+    });
+  }
   fetch('/api/allocate/' + encodeURIComponent(date) + '/summary')
     .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(function(summary) {
@@ -2650,13 +2883,20 @@ function refreshAllocation() {
       renderSummary(summary);
       renderSrList(summary.srSummaries);
       lmShowPanel(summary.srSummaries);
-      if (lastAllocationMode) renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode);
+      if (lastAllocationMode) {
+        renderAllSrsOnMap(summary.srSummaries, date, lastAllocationMode, function() { hideAllocLoading(); });
+      } else {
+        hideAllocLoading();
+      }
       if (currentSrName) {
         var idx = summary.srSummaries.findIndex(function(s) { return s.srName === currentSrName; });
         if (idx >= 0) selectSr(currentSrName, idx);
       }
     })
-    .catch(function(e) { console.warn('Refresh error', e); });
+    .catch(function(e) {
+      hideAllocLoading();
+      console.warn('Refresh error', e);
+    });
 }
 
 // ── UTILITIES ─────────────────────────────────────────────────────────────────
@@ -3851,6 +4091,17 @@ function runAffinityAllocation() {
     }
   }
 
+  showAllocLoading('Custom Zones', {
+    title: 'Running zone-based allocation…',
+    subtitle: 'Saving regions and allocating shipments using the drawn zones.',
+    stages: [
+      'Saving custom regions',
+      'Matching shipments to regions',
+      'Assigning SRs to regions',
+      'Sequencing routes per SR',
+      'Computing fairness metrics'
+    ]
+  });
   fetch('/api/affinity-match/set-custom-regions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3858,7 +4109,7 @@ function runAffinityAllocation() {
   })
   .then(function(r) { return r.json(); })
   .then(function(setResult) {
-    if (setResult.error) { showAllocError(setResult.error); return; }
+    if (setResult.error) { hideAllocLoading(); showAllocError(setResult.error); return; }
     // 9.3: include allocationMode in the request body
     var allocMode = getAllocationMode();
     var allocBody = { date: date, allocationMode: allocMode };
@@ -3872,6 +4123,7 @@ function runAffinityAllocation() {
   .then(function(data) {
     if (!data) return;
     if (data.error) {
+      hideAllocLoading();
       // 9.9: error message in time-based mode should not reference count-based fields
       if (getAllocationMode() === 'time-based') {
         showAllocError('Allocation failed. Please check your affinity configuration.');
@@ -3881,8 +4133,10 @@ function runAffinityAllocation() {
       return;
     }
     _handleAffinityResult(data, date);
+    hideAllocLoading();
   })
   .catch(function(e) {
+    hideAllocLoading();
     // 9.9: mode-aware error message
     if (getAllocationMode() === 'time-based') {
       showAllocError('Allocation failed. Please check your affinity configuration.');
@@ -3943,11 +4197,26 @@ function loadPreviousAllocation() {
   var affinityModeBtn = document.getElementById('mode-affinity-btn');
   if (affinityModeBtn) { affinityModeBtn.style.background = '#e9ecef'; affinityModeBtn.style.color = '#495057'; }
 
+  showAllocLoading('Previous', {
+    title: 'Loading previous allocation…',
+    subtitle: 'Restoring the original allocation snapshot for ' + date + '.',
+    stages: [
+      'Fetching previous summary',
+      'Rebuilding per-SR earnings',
+      'Restoring routes on the map'
+    ]
+  });
+
   fetch('/api/previous/' + encodeURIComponent(date) + '/summary')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       btn.innerHTML = '📊 Previous';
-      if (data.error) { showAllocError(data.error); btn.style.background = '#e9ecef'; btn.style.color = '#495057'; return; }
+      if (data.error) {
+        hideAllocLoading();
+        showAllocError(data.error);
+        btn.style.background = '#e9ecef'; btn.style.color = '#495057';
+        return;
+      }
 
       clearAllocationUI();
 
@@ -3987,13 +4256,21 @@ function loadPreviousAllocation() {
         });
         list.innerHTML = h;
 
-        // Render markers on map
-        renderPreviousOnMap(data.srSummaries, date);
+        // Markers are rendered below (after this block) via renderPreviousOnMap
+        // so the loading overlay can wait until polylines have been drawn.
       }
 
       showAllocInfo('Previous allocation loaded: ' + data.totalSrs + ' SRs, ' + data.allocatedShipments + ' shipments. Earnings range: ₹' + (data.earningsRange || 0).toFixed(0));
+      // Hand the loader off to renderPreviousOnMap — it will dismiss once
+      // every per-SR polyline has been fetched and drawn.
+      if (data.srSummaries && data.srSummaries.length) {
+        renderPreviousOnMap(data.srSummaries, date, function() { hideAllocLoading(); });
+      } else {
+        hideAllocLoading();
+      }
     })
     .catch(function(e) {
+      hideAllocLoading();
       btn.innerHTML = '📊 Previous';
       btn.style.background = '#e9ecef';
       btn.style.color = '#495057';
@@ -4001,12 +4278,15 @@ function loadPreviousAllocation() {
     });
 }
 
-function renderPreviousOnMap(srSummaries, date) {
+function renderPreviousOnMap(srSummaries, date, onComplete) {
   clearMarkers();
   var i = 0;
   function next() {
     if (i >= srSummaries.length) {
       if (activeMapProvider === 'google') syncToGoogleMap();
+      if (typeof onComplete === 'function') {
+        try { onComplete(); } catch (e) { /* ignore */ }
+      }
       return;
     }
     var sr = srSummaries[i], color = SR_COLORS[i % SR_COLORS.length], idx = i; i++;
