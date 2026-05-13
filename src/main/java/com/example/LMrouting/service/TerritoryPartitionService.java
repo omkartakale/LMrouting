@@ -135,6 +135,15 @@ public class TerritoryPartitionService {
             }
         }
 
+        // Step 3.5: Territory ownership validation — fix cross-cluster assignments
+        // Run up to 3 passes for convergence
+        for (int pass = 0; pass < 3; pass++) {
+            int moved = validateTerritoryOwnership(finalAssignments, srShiftDurations,
+                    globalShiftDuration, hubLat, hubLng);
+            if (moved == 0) break;
+            log.info("TerritoryPartition: ownership validation pass {} — reassigned {} shipments", pass + 1, moved);
+        }
+
         // Step 4: Try to place overflow into geographically aligned SRs (soft fit)
         if (!overflow.isEmpty()) {
             List<Shipment> stillOverflow = new ArrayList<>();
@@ -301,6 +310,93 @@ public class TerritoryPartitionService {
         }
 
         return result;
+    }
+
+    /**
+     * Territory ownership validation pass.
+     * Detects shipments assigned to an SR but geographically closer to another SR's territory.
+     * Reassigns them if the target SR has capacity, improving route compactness.
+     *
+     * @param assignments current SR assignments (modified in place)
+     * @param srShiftDurations per-SR shift durations
+     * @param globalShiftDuration fallback
+     * @param hubLat hub latitude
+     * @param hubLng hub longitude
+     * @return number of shipments reassigned
+     */
+    private int validateTerritoryOwnership(Map<String, List<Shipment>> assignments,
+                                            Map<String, Integer> srShiftDurations,
+                                            int globalShiftDuration,
+                                            double hubLat, double hubLng) {
+        // Compute centroids for each SR's current territory
+        Map<String, double[]> centroids = new LinkedHashMap<>();
+        for (Map.Entry<String, List<Shipment>> entry : assignments.entrySet()) {
+            if (entry.getValue().isEmpty()) continue;
+            double avgLat = entry.getValue().stream().mapToDouble(Shipment::getDropLatitude).average().orElse(hubLat);
+            double avgLng = entry.getValue().stream().mapToDouble(Shipment::getDropLongitude).average().orElse(hubLng);
+            centroids.put(entry.getKey(), new double[]{avgLat, avgLng});
+        }
+
+        if (centroids.size() < 2) return 0;
+
+        int reassigned = 0;
+
+        for (String sr : new ArrayList<>(assignments.keySet())) {
+            List<Shipment> srShipments = assignments.get(sr);
+            if (srShipments.isEmpty()) continue;
+            double[] ownCentroid = centroids.get(sr);
+            if (ownCentroid == null) continue;
+
+            List<Shipment> toReassign = new ArrayList<>();
+            Map<Shipment, String> reassignTargets = new LinkedHashMap<>();
+
+            for (Shipment s : srShipments) {
+                double distToOwn = haversine(s.getDropLatitude(), s.getDropLongitude(),
+                        ownCentroid[0], ownCentroid[1]);
+
+                // Find the closest OTHER SR's centroid
+                String closestOtherSr = null;
+                double closestOtherDist = Double.MAX_VALUE;
+                for (Map.Entry<String, double[]> other : centroids.entrySet()) {
+                    if (other.getKey().equals(sr)) continue;
+                    double dist = haversine(s.getDropLatitude(), s.getDropLongitude(),
+                            other.getValue()[0], other.getValue()[1]);
+                    if (dist < closestOtherDist) {
+                        closestOtherDist = dist;
+                        closestOtherSr = other.getKey();
+                    }
+                }
+
+                // Reassign if the shipment is >30% closer to another SR's centroid
+                if (closestOtherSr != null && closestOtherDist < distToOwn * 0.70) {
+                    toReassign.add(s);
+                    reassignTargets.put(s, closestOtherSr);
+                }
+            }
+
+            // Execute reassignments (check capacity)
+            for (Shipment s : toReassign) {
+                String targetSr = reassignTargets.get(s);
+                int targetShiftDuration = getShiftDuration(targetSr, srShiftDurations, globalShiftDuration);
+                double targetSoftCap = targetShiftDuration * 1.05;
+
+                List<Shipment> targetShipments = assignments.get(targetSr);
+                List<Shipment> trial = new ArrayList<>(targetShipments);
+                trial.add(s);
+                ShiftWorkloadCalculatorService.WorkloadResult w = workloadCalculator.computeWorkload(
+                        nearestNeighbourOrder(trial, hubLat, hubLng));
+
+                if (w.totalMinutes() <= targetSoftCap) {
+                    // Reassign: remove from source, add to target
+                    srShipments.remove(s);
+                    targetShipments.add(s);
+                    reassigned++;
+                }
+                // If target can't absorb, leave in current SR (don't create overflow)
+            }
+        }
+
+        return reassigned;
     }
 
     /**

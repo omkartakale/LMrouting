@@ -191,10 +191,21 @@ public class EarningsBalancingService {
                 .collect(Collectors.toList());
         double medianDistance = computeMedian(allDistances);
 
-        // Only consider boundary candidates: distance to poor centroid < median distance
+        // Compute rich SR centroid
+        double[] richCentroid = computeCentroid(richShipments);
+
+        // Only consider TRUE boundary candidates:
+        // 1. Distance to poor centroid < distance to own (rich) centroid (genuinely closer to receiving SR)
+        // 2. Distance to poor centroid < median distance (existing guard)
         List<Shipment> candidates = richShipments.stream()
-                .filter(s -> haversine(s.getDropLatitude(), s.getDropLongitude(),
-                        poorCentroid[0], poorCentroid[1]) <= medianDistance)
+                .filter(s -> {
+                    double distToPoor = haversine(s.getDropLatitude(), s.getDropLongitude(),
+                            poorCentroid[0], poorCentroid[1]);
+                    double distToOwn = haversine(s.getDropLatitude(), s.getDropLongitude(),
+                            richCentroid[0], richCentroid[1]);
+                    // Only transfer if shipment is genuinely closer to the receiving SR
+                    return distToPoor < distToOwn && distToPoor <= medianDistance;
+                })
                 .sorted(Comparator.comparingDouble((Shipment s) ->
                         haversine(s.getDropLatitude(), s.getDropLongitude(),
                                 poorCentroid[0], poorCentroid[1])))
