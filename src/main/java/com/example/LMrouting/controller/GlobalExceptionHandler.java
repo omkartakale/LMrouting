@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -53,6 +54,15 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Static resource / SPA paths — do not turn these into HTTP 500 JSON from the generic handler.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNoResourceFound(NoResourceFoundException ex) {
+        log.debug("No static resource: {}", ex.getResourcePath());
+        return buildResponse(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    /**
      * Bad-request bucket: any IllegalArgumentException / IllegalStateException
      * thrown from validation paths should reach the client with its message,
      * not Spring's default empty 500.
@@ -70,6 +80,14 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneric(Exception ex) {
+        if (ex instanceof NoResourceFoundException nr) {
+            return handleNoResourceFound(nr);
+        }
+        for (Throwable c = ex.getCause(); c != null; c = c.getCause()) {
+            if (c instanceof NoResourceFoundException nr) {
+                return handleNoResourceFound(nr);
+            }
+        }
         log.error("Unhandled exception in API:", ex);
         String msg = ex.getMessage();
         if (msg == null || msg.isBlank()) {
