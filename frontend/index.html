@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shipment Allocation Optimizer v3</title>
+    <!-- Same CDN libraries as the original index.html so the legacy JS continues to work -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.css" />
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.16.0/dist/leaflet-geoman.min.js"></script>
+    <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
+    <script>
+      // Google Maps key bootstrap — loaded from /api/config at runtime by the
+      // legacy allocation module. Identical behaviour to the original index.html.
+      window.GMAP_API_KEY = '';
+      window.gmapReady = false;
+      window.loadGoogleMapsScript = function (key) {
+        if (document.getElementById('gmap-script')) return;
+        window.GMAP_API_KEY = key;
+        var s = document.createElement('script');
+        s.id = 'gmap-script';
+        s.src =
+          'https://maps.googleapis.com/maps/api/js?key=' +
+          key +
+          '&libraries=drawing&callback=onGoogleMapsReady';
+        s.async = true;
+        s.defer = true;
+        document.head.appendChild(s);
+      };
+      window.onGoogleMapsReady = function () {
+        window.gmapReady = true;
+      };
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
