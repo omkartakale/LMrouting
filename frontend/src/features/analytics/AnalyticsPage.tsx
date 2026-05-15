@@ -20,7 +20,7 @@ export function AnalyticsPage() {
 
   const live = useQuery({
     queryKey: ['summary', date],
-    queryFn: () => api.summary(date!),
+    queryFn: () => api.getAllocationSummary(date!),
     enabled: !!date && !snap,
     retry: false,
   })

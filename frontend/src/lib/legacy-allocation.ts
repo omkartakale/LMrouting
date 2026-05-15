@@ -1395,16 +1395,163 @@ function runLegacyAllocationModule() {
     initUpload();
     applyAllocationModeUI(getAllocationMode());
     loadSrShiftDurations();
+    
+    // ── Sidebar tab navigation ────────────────────────────────────────────────
+    var sbTabUpload = document.getElementById('sb-tab-upload');
+    var sbTabAllocate = document.getElementById('sb-tab-allocate');
+    var sbTabMonitor = document.getElementById('sb-tab-monitor');
+    if (sbTabUpload) sbTabUpload.addEventListener('click', function() { switchSidebarTab('upload'); });
+    if (sbTabAllocate) sbTabAllocate.addEventListener('click', function() { switchSidebarTab('allocate'); });
+    if (sbTabMonitor) sbTabMonitor.addEventListener('click', function() { switchSidebarTab('monitor'); });
+    
+    // ── Allocation buttons ─────────────────────────────────────────────────────
     var runOsm = document.getElementById('run-osm-btn'); if (runOsm) runOsm.addEventListener('click', function() { runAllocation('osm'); });
     var runG = document.getElementById('run-google-btn'); if (runG) runG.addEventListener('click', function() { runAllocation('google'); });
     var cmp = document.getElementById('compare-btn'); if (cmp) cmp.addEventListener('click', compareRoutes);
     var undo = document.getElementById('undo-btn'); if (undo) undo.addEventListener('click', undoOverride);
     var fin = document.getElementById('finalize-btn'); if (fin) fin.addEventListener('click', finalizeAllocation);
     var dateSel = document.getElementById('date-select'); if (dateSel) dateSel.addEventListener('change', onDateChange);
+    
+    // ── Previous allocation mode button ────────────────────────────────────────
+    var prevBtn = document.getElementById('mode-previous-btn');
+    if (prevBtn) prevBtn.addEventListener('click', function() { loadPreviousAllocation(); });
+    
+    // ── Attendance buttons ─────────────────────────────────────────────────────
+    var markAllBtn = document.getElementById('mark-all-present-btn');
+    var markNoneBtn = document.getElementById('mark-none-present-btn');
+    var addSrBtn = document.getElementById('add-new-sr-btn');
+    if (markAllBtn) markAllBtn.addEventListener('click', function() { markAllPresent(); });
+    if (markNoneBtn) markNoneBtn.addEventListener('click', function() { markNonePresent(); });
+    if (addSrBtn) addSrBtn.addEventListener('click', function() { addNewSr(); });
+    
+    // ── Affinity buttons ───────────────────────────────────────────────────────
+    var modeCountBtn = document.getElementById('mode-count-btn');
+    var modeTimeBtn = document.getElementById('mode-timebased-btn');
+    var applyRegionBtn = document.getElementById('apply-region-count-btn');
+    var runAffinityBtn = document.getElementById('run-affinity-allocation-btn');
+    var saveRegionsBtn = document.getElementById('save-regions-btn');
+    var clearAffinityBtn = document.getElementById('clear-affinity-btn');
+    if (modeCountBtn) modeCountBtn.addEventListener('click', function() { setAllocationMode('count-based'); });
+    if (modeTimeBtn) modeTimeBtn.addEventListener('click', function() { setAllocationMode('time-based'); });
+    if (applyRegionBtn) applyRegionBtn.addEventListener('click', function() { applyRegionCount(); });
+    if (runAffinityBtn) runAffinityBtn.addEventListener('click', function() { runAffinityAllocation(); });
+    if (saveRegionsBtn) saveRegionsBtn.addEventListener('click', function() { saveRegionsToStorage(); });
+    if (clearAffinityBtn) clearAffinityBtn.addEventListener('click', function() { clearAllAffinities(); });
+    
+    // ── LM Integration buttons ─────────────────────────────────────────────────
+    var lmConnectBtn = document.getElementById('lm-connect-btn');
+    var lmFetchBtn = document.getElementById('lm-fetch-dashboard-btn');
+    var lmLoadUsersBtn = document.getElementById('lm-load-delivery-users-btn');
+    var lmPushBtn = document.getElementById('lm-push-all-btn');
+    var lmConfirmBtn = document.getElementById('lm-confirm-all-btn');
+    if (lmConnectBtn) lmConnectBtn.addEventListener('click', function() { lmConnect(); });
+    if (lmFetchBtn) lmFetchBtn.addEventListener('click', function() { lmFetchDashboard(); });
+    if (lmLoadUsersBtn) lmLoadUsersBtn.addEventListener('click', function() { lmLoadDeliveryUsers(); });
+    if (lmPushBtn) lmPushBtn.addEventListener('click', function() { lmPushAll(); });
+    if (lmConfirmBtn) lmConfirmBtn.addEventListener('click', function() { lmConfirmAll(); });
+    
+    // ── Map control buttons ────────────────────────────────────────────────────
+    var fullscreenBtn = document.getElementById('fullscreen-btn');
+    var mapToggleBtn = document.getElementById('map-toggle-btn');
+    var pincodeBtn = document.getElementById('pincode-boundary-btn');
+    var densityBtn = document.getElementById('density-toggle-btn');
+    var shipmentBtn = document.getElementById('shipment-toggle-btn');
+    var rawPlotBtn = document.getElementById('raw-plot-btn');
+    if (fullscreenBtn) fullscreenBtn.addEventListener('click', function() { toggleMapFullscreen(); });
+    if (mapToggleBtn) mapToggleBtn.addEventListener('click', function() { toggleMapProvider(); });
+    if (pincodeBtn) pincodeBtn.addEventListener('click', function() { togglePincodeBoundaries(); });
+    if (densityBtn) densityBtn.addEventListener('click', function() { toggleDensityMarkers(); });
+    if (shipmentBtn) shipmentBtn.addEventListener('click', function() { toggleShipmentDisplay(); });
+    if (rawPlotBtn) rawPlotBtn.addEventListener('click', function() { toggleRawShipmentPlot(); });
+    
+    // ── Region health panel toggle ─────────────────────────────────────────────
+    var regionHealthToggle = document.getElementById('region-health-toggle');
+    if (regionHealthToggle) regionHealthToggle.addEventListener('click', function() { toggleRegionHealthPanel(); });
+    
+    // ── Map legend toggle ──────────────────────────────────────────────────────
+    var mapLegend = document.getElementById('map-legend');
+    if (mapLegend) {
+      var legendH4 = mapLegend.querySelector('h4');
+      if (legendH4) legendH4.addEventListener('click', function() { mapLegend.classList.toggle('collapsed'); });
+    }
+    
+    // ── Modal handlers ─────────────────────────────────────────────────────────
     var mc = document.getElementById('modal-cancel-btn'); if (mc) mc.addEventListener('click', function() { (document.getElementById('override-modal') as HTMLDialogElement).close(); });
     var mcf = document.getElementById('modal-confirm-btn'); if (mcf) mcf.addEventListener('click', confirmOverride);
+    
+    // ── Fetch available dates ──────────────────────────────────────────────────
     fetch('/api/csv/dates').then(function(r) { return r.json(); }).then(function(dates) { if (dates.length) populateDateSelector(dates); }).catch(function() {});
   });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // SIDEBAR TAB NAVIGATION
+  // ══════════════════════════════════════════════════════════════════════════════
+  
+  /**
+   * Switch the visible sidebar tab.
+   * @param {'upload'|'allocate'|'monitor'} name
+   */
+  function switchSidebarTab(name: string) {
+    var tabs = ['upload', 'allocate', 'monitor'];
+    tabs.forEach(function(t) {
+      var btn  = document.getElementById('sb-tab-' + t);
+      var pane = document.getElementById('tab-pane-' + t);
+      if (!btn || !pane) return;
+      var active = (t === name);
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      pane.classList.toggle('active', active);
+    });
+  }
+  w.switchSidebarTab = switchSidebarTab;
+
+  /** Enable a tab button (clears its disabled state and marks it as available). */
+  function unlockSidebarTab(name: string) {
+    var btn = document.getElementById('sb-tab-' + name);
+    if (!btn) return;
+    (btn as HTMLButtonElement).disabled = false;
+    btn.classList.add('has-progress');
+    btn.removeAttribute('title');
+  }
+  w.unlockSidebarTab = unlockSidebarTab;
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // AUTO-ADVANCE WRAPPERS
+  // ══════════════════════════════════════════════════════════════════════════════
+  
+  // Wrap renderUploadResult: on a successful upload, unlock Allocate and switch to it.
+  (function() {
+    var _origRender = renderUploadResult;
+    renderUploadResult = function(data: any) {
+      var result = _origRender.apply(this, arguments as any);
+      try {
+        // Treat any result that produced a primaryDate or non-zero validCount
+        // as a successful upload.
+        var ok = data && (data.primaryDate || (data.validCount && data.validCount > 0));
+        if (ok) {
+          unlockSidebarTab('allocate');
+          switchSidebarTab('allocate');
+        }
+      } catch (e) { /* never break the underlying flow */ }
+      return result;
+    };
+  })();
+
+  // Wrap renderSummary: after a successful allocation, unlock Monitor and switch to it.
+  (function() {
+    var _origRender = renderSummary;
+    renderSummary = function(summary: any) {
+      var result = _origRender.apply(this, arguments as any);
+      try {
+        // Any summary with SR summaries is a successful allocation.
+        if (summary && summary.srSummaries && summary.srSummaries.length > 0) {
+          unlockSidebarTab('monitor');
+          switchSidebarTab('monitor');
+        }
+      } catch (e) { /* never break */ }
+      return result;
+    };
+  })();
 
   // Forward declared (filled in by rest module via __legacyAllocCtx)
   function renderRegionHealth(_summary) { /* injected */ }
