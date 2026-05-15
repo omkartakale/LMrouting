@@ -25,7 +25,8 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    outDir: '../src/main/resources/static',
+    emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
       input: {

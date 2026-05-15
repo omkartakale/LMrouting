@@ -778,7 +778,7 @@ function runLegacyAllocationModule() {
   w.saveSrShiftDurations = saveSrShiftDurations;
   w.addNewSr = addNewSr;
   w.runAllocation = runAllocation;
-  w.renderUploadResult = renderUploadResult;
+  // NOTE: w.renderUploadResult is assigned AFTER the wrapper below
 
   // The remaining behaviour (allocation results, route panel, override modal,
   // affinity zones, LM integration, previous allocation, density/raw toggles)
@@ -1377,7 +1377,7 @@ function runLegacyAllocationModule() {
     return '<div class="rebalance-suggestions" style="margin-top:10px;border-top:1px solid #e9ecef;padding-top:10px"><div style="font-size:.78rem;font-weight:700;color:#343a40;margin-bottom:6px">💡 Suggested Rebalancing (target: all SRs within ±' + Math.round(bandPct * 100) + '% of mean)</div><div style="background:#fff;border:1px solid #e9ecef;border-radius:7px;overflow:hidden">' + rows + '</div><div style="margin-top:6px;font-size:.72rem;color:#757575;line-height:1.4">Estimates use each donor SR\'s average payout per shipment. Apply them via the Reassign button on individual stops, or adjust SR attendance and re-run allocation.</div></div>';
   }
 
-  w.renderSummary = renderSummary;
+  // NOTE: w.renderSummary is assigned AFTER the wrapper below
   w.selectSr = selectSr;
   w.openReassignModal = openReassignModal;
   w.toggleTimeline = toggleTimeline;
@@ -1552,6 +1552,10 @@ function runLegacyAllocationModule() {
       return result;
     };
   })();
+
+  // NOW assign the wrapped versions to window (after wrappers are applied)
+  w.renderUploadResult = renderUploadResult;
+  w.renderSummary = renderSummary;
 
   // Forward declared (filled in by rest module via __legacyAllocCtx)
   function renderRegionHealth(_summary) { /* injected */ }
